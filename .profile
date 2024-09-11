@@ -1,0 +1,15 @@
+export HEM=$HOME/.hem
+export XDG_CONFIG_HOME=$HOME/.config
+export XDG_DATA_DIRS=$XDG_DATA_DIRS:/opt/local/share
+export ORG_DIR=$HEM/org
+export DSSI_PATH=$HOME/.dssi
+export LADSPA_PATH=$HOME/.ladspa
+export LV2_PATH=$HOME/.lv2
+export LXVST_PATH=$HOME/.lxvst
+export VST_PATH=$HOME/.vst
+export GOPATH=$HOME/.go
+export PASSWORD_STORE_DIR=$HEM/päss
+export GDK_BACKEND=wayland
+export PATH=$HOME/.local/bin:$PATH
+export PATH=$HEM/bin:$PATH
+export PATH=$PATH:/opt/local/bin
