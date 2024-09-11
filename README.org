@@ -1,1 +1,4 @@
-Run `stow --no-folding -t $HOME` to install these dotfiles.
+Run the following in your terminal to install these dotfiles:
+#+begin_src sh
+stow --no-folding -t $HOME
+#+end_src
