@@ -1,0 +1,10 @@
+*
+!.gitignore
+!bookmarks
+!config.org
+!*init.el
+!snippets/
+!snippets/**
+!var/
+var/**
+!var/bookmark-default.el

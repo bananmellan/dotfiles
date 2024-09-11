@@ -1,0 +1,4 @@
+# -*- mode: snippet -*-
+# name: tag
+# --
+<${1:div}>$0</$1>
