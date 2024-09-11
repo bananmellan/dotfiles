@@ -1,0 +1,86 @@
+#!/usr/bin/env fish
+argparse 'l/list' 's/status' 'i/ip' -- $argv
+or return
+
+set VPN_DEFAULT dk
+set VPN_DIR $HEM/.VPNs
+set VPN_NAME $argv[1]
+[ $VPN_NAME ] || set VPN_NAME $VPN_DEFAULT
+set VPN $VPN_NAME
+set VPNs (ls $VPN_DIR | awk -F'.' '{print $1}')
+
+if not contains $VPN_NAME $VPNs
+    set_color red; printf "Unknown "; set_color normal
+    printf "VPN "
+    set_color -o magenta; printf $VPN_NAME; set_color normal
+    printf " specified, use one of the following:"
+    echo
+    set _flag_list true
+end
+
+if [ $_flag_list ]
+    for v in $VPNs
+        set_color -o magenta; printf $v; set_color normal
+        printf " -> "
+
+        if [ -d /sys/class/net/$v ]
+            set_color -o green; printf active; set_color normal
+        else
+            set_color -o red; printf inactive; set_color normal
+        end
+
+        echo
+    end
+
+    exit
+end
+
+set active
+for v in $VPNs;
+    if [ -d /sys/class/net/$v ]
+        set active $v
+        break
+    end
+end
+
+if [ $_flag_status ]
+    if [ $active ]
+        set_color green; printf active; set_color normal
+        printf " @ "
+        set_color -o magenta; printf $v; set_color normal
+    else
+        set_color red; echo inactive; set_color normal
+    end
+
+    exit
+end
+
+if [ $active ] && [ $active != $VPN_NAME ]
+    printf 'VPN '
+    set_color -o red; printf $active; set_color normal
+    printf ' already running, stopping it first... '
+    sudo wg-quick down $VPN_DIR/$active.conf > /dev/null 2>&1
+    echo done!
+else if [ -d /sys/class/net/$VPN ]
+    printf "Stopping VPN... "
+    sudo wg-quick down $VPN_DIR/$VPN.conf > /dev/null 2>&1
+    set_color red; printf stopped; set_color normal
+    printf '.'
+    exit
+end
+
+if not [ -d /sys/class/net/$VPN ]
+    printf "Starting VPN "
+    set_color -o magenta; printf $VPN_NAME; set_color normal
+    printf "... "
+    sudo wg-quick up $VPN_DIR/$VPN.conf > /dev/null 2>&1
+    set_color green; printf done; set_color normal
+    printf '!'
+end
+
+if [ $_flag_ip ]
+    printf " Your public IP is "
+    set_color blue; printf "%s" (curl https://icanhazip.com 2>/dev/null || printf error); set_color normal
+end
+
+echo

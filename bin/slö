@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+if [ -z "`git rev-parse --show-toplevel 2>&1 >/dev/null`" ]; then
+	if [ -z "$1" ]; then
+		msg=":)"
+	else
+		msg="$1"
+	fi
+
+	git commit -am "$msg" && git push
+else
+	echo "Du är inte i ett Git-projekt."
+fi

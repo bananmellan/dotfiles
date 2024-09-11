@@ -1,0 +1,42 @@
+[global]
+origin = top-right
+offset = 24x-24
+padding = 16
+horizontal_padding = 32
+text_icon_padding = 16
+frame_width = 0
+gap_size = 8
+font = "LiterationMono Nerd Font Mono 14"
+width = 512
+notification_limit = 16
+format = "<b> %a </b>\n\n<i>%s</i>\n%b"
+show_age_threshold = 60
+history_length = 64
+timeout = 16
+icon_theme = Adwaita
+enable_recursive_icon_lookup = true
+background = "#FAF1F0F9"
+foreground = "#000000"
+enable_posix_regex = true
+# ignore_dbusclose = true
+
+[urgency_critical]
+timeout = 0
+
+[outlook]
+summary = Outlook
+background = "#CCCCF0F9"
+timeout = 0
+
+[teams]
+summary = "Chatt med"
+background = "#CCCCF0F9"
+timeout = 0
+
+[firefox]
+appname = Firefox
+timeout = 120
+
+[emacs]
+appname = Emacs
+timeout = 30

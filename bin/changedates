@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+from datetime import datetime
+from sys import argv
+import glob
+import os
+import re
+
+# datetime.strptime()
+for path in glob.iglob(argv[1]):
+    split = str.split(os.path.splitext(path)[0], "/")
+    ddate = split[len(split) - 1]
+
+    try:
+        stamp = datetime.strptime(argv[2], "%Y").timestamp()
+        os.utime(path, (stamp, stamp))
+    except:
+        try:
+            if ddate[:3] == "IMG":
+                stamp = datetime.strptime(ddate[:19], "IMG_%Y%m%d_%H%M%S").timestamp()
+                os.utime(path, (stamp, stamp))
+            if ddate[:3] == "VID":
+                stamp = datetime.strptime(ddate[:19], "VID_%Y%m%d_%H%M%S").timestamp()
+                os.utime(path, (stamp, stamp))
+            elif ddate[:3] == "Scr":
+                stamp = datetime.strptime(ddate[:26], "Screenshot_%Y%m%d-%H%M%S").timestamp()
+                os.utime(path, (stamp, stamp))
+            elif ddate[:3] == "PXL":
+                stamp = datetime.strptime(ddate[:19], "PXL_%Y%m%d_%H%M%S").timestamp()
+                os.utime(path, (stamp, stamp))
+        except:
+            print("File " + path + " had a weird format.")

@@ -1,0 +1,16 @@
+profile laptop-docked {
+    output DP-1  enable scale 1
+    output eDP-1 disable # scale 1 position 10000,10000
+    # exec hyprctl dispatch focusmonitor eDP-1 && hyprctl dispatch workspace 10 && hyprctl dispatch focusmonitor DP-1
+    # exec lapmon
+}
+
+profile laptop-undocked {
+    output eDP-1 # enable scale 1
+    # exec lapmon
+}
+
+profile NULL {
+    # exec lapmon
+    exec hyprctl keyword monitor "eDP-1,preferred,auto,1"
+}

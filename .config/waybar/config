@@ -1,0 +1,73 @@
+{
+    "layer": "top",
+    "height": 48,
+    "modules-left": ["wlr/workspaces"],
+    "modules-center": ["clock"],
+    "modules-right": ["network", "bluetooth", "wireplumber", "cpu", "battery", "tray"],
+    "hyprland/window": {
+        "max-length": 50
+    },
+    "tray": {
+        // "icon-size": 21,
+        "spacing": 10
+    },
+    "backlight": {
+        "format": "  {percent}% "
+    },
+    "cpu": {
+        "format": "  {usage}% "
+    },
+    "memory": {
+        "format": "MEM  {}% "
+    },
+    "clock": {
+        "format": "{:%A %d %B %H:%M:%S}",
+        "interval": 1
+    },
+    "network": {
+        "interface": "wlp*",
+        "format": "{ifname}",
+        "format-wifi": " {icon}  {essid} ",
+        "format-ethernet": "󰈁",
+        "format-disconnected": "󰈂", //An empty format will hide the module.
+        "tooltip-format": "{ifname} via {gwaddr} 󰊗",
+        "tooltip-format-wifi": "{essid} ({signalStrength}%) {icon}",
+        "tooltip-format-ethernet": "{ifname} 󰈁",
+        "tooltip-format-disconnected": "󰈂",
+        "max-length": 50,
+        "format-icons": ["󰤯", "󰤟", "󰤢", "󰤥", "󰤨"]
+    },
+    "bluetooth": {
+         "format-off": "",
+         "format-on": "",
+         "format-connected": "󰥰  {device_alias} "
+    },
+    "wlr/workspaces": {
+        "format": "{icon}",
+        "on-scroll-up": "hyprctl dispatch workspace e+1",
+        "on-scroll-down": "hyprctl dispatch workspace e-1",
+        "format-icons": {
+            "1": "1  ",
+            "2": "2  ",
+            "3": "3  󰗋",
+            "4": "4  󰎆",
+            "5": "5  󰲹",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "urgent": "",
+            // "active": "",
+            "default": ""
+        },
+    },
+    "wireplumber": {
+        "format": " {icon}  {volume} ",
+        "format-muted": " 󰖁 ",
+        "format-icons": ["", "", ""]
+    },
+    "battery": {
+        "format": "{icon}  {capacity} ",
+        "format-icons": ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"]
+    }
+}

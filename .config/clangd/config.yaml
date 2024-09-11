@@ -1,0 +1,2 @@
+Diagnostics:
+  Suppress: ['pp_expr_bad_token_lparen', 'format', 'fatal_too_many_errors', 'pp_file_not_found', 'unknown_typename', 'unknown-pragmas']

@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+
+##################################
+# Runs and detaches any command. #
+##################################
+
+from sys import argv
+from subprocess import Popen, DEVNULL
+
+# Open subprocess and redirect output to /dev/null.
+Popen(argv[1:], stdout=DEVNULL, stderr=DEVNULL)
+print("Gafflade " + argv[1] + '!')
+
+# Exit script, though spawned process will not be affected.
+exit(1)
