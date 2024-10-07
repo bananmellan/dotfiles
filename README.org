@@ -1,4 +1,4 @@
 Run the following in your terminal to install these dotfiles:
 #+begin_src sh
-stow --no-folding -t $HOME
+stow --no-folding -t $HOME .
 #+end_src
