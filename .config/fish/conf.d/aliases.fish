@@ -22,6 +22,11 @@ if status --is-interactive
     exists julia && alias julia="julia -q"
     alias b="buku --deep"
 
+    function hemlis
+        wl-paste | \
+            run0 --pipe sh -c "systemd-creds encrypt --user --uid=$(id -u) --with-key=host+tpm2 - $HOME/.secrets/$argv[1] && chown $USER:$USER $HOME/.secrets/$argv[1]"
+    end
+
     # alias stow="stow --no-folding"
     if exists diceware
         alias diceware="diceware --no-caps -d ."
