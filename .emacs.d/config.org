@@ -1933,21 +1933,31 @@ körverk syns som meddelande i ekorutan."
 #+end_src
 ** Gptel
 #+begin_src emacs-lisp
-
 (use-package gptel :ensure
-  :init
+  :config
   ;; (gptel-make-ollama "Ollama"
   ;;   :host "localhost:11434"
   ;;   :stream t
   ;;   :models '(qwen3-coder-next:cloud))
 
-  (setq
-   gptel-model 'glm-4.7:cloud
-   gptel-backend (gptel-make-ollama "Ollama"
-                   :host "localhost:11434"
-                   :stream t
-                   :models '(glm-4.7-flash:latest)))
-  )
+  ;; (setq
+  ;;  gptel-model 'glm-4.7:cloud
+  ;;  gptel-backend (gptel-make-ollama "Ollama"
+  ;;                  :host "localhost:11434"
+  ;;                  :stream t
+  ;;                  :models '(glm-4.7-flash:latest)))
+
+  (setq gptel-model "mistral-small-latest"
+        gptel-backend (gptel-make-openai "Mistral"
+                        :host "api.mistral.ai"
+                        :endpoint "/v1/chat/completions"
+                        :protocol "https"
+                        :key (lambda ()
+                               (auth-source-pick-first-password
+                                :host "api.mistral.ai"))
+                        :models '("mistral-small-latest"
+                                  "mistral-medium-latest"
+                                  "mistral-large-latest"))))
 #+end_src
 ** cutup.el
 #+begin_src emacs-lisp
