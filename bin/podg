@@ -332,6 +332,7 @@ def main():
     args = sys.argv[1:]
     image = None
     use_audio = False
+    verbose = False
     passthrough_args = []
 
     # Podman run flags that take a value
@@ -342,6 +343,9 @@ def main():
         arg = args[i]
         if arg == "--audio":
             use_audio = True
+            i += 1
+        elif arg == "--verbose":
+            verbose = True
             i += 1
         elif arg in flags_with_value and "=" not in arg:
             # Flag that takes a separate value
@@ -384,12 +388,54 @@ def main():
     ]
 
     # Add audio-specific configurations
+    original_profile = None
+    hostname = socket.gethostname()
+    card_name = HOST_AUDIO_CARDS.get(hostname)
     if use_audio:
         # Host-specific audio profile setup
-        hostname = socket.gethostname()
-        if hostname in HOST_AUDIO_CARDS:
-            card_name = HOST_AUDIO_CARDS[hostname]
+        if verbose:
+            print(f"[verbose] Audio flag used, hostname={hostname}, card_name={card_name}", file=sys.stderr)
+        if card_name:
+            # Save current profile before changing it
+            # Get the active profile by parsing 'pactl list cards' output
+            try:
+                result = subprocess.run(
+                    ["pactl", "list", "cards"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                if verbose:
+                    print(f"[verbose] pactl list cards output:\n{result.stdout}", file=sys.stderr)
+                # Parse output to find the active profile for this card
+                # Format: "Active Profile: <profile_name>"
+                in_card_section = False
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if f"Name: {card_name}" in line:
+                        in_card_section = True
+                        if verbose:
+                            print(f"[verbose] Found card section: {line}", file=sys.stderr)
+                    elif in_card_section and line.startswith("Name:"):
+                        # Reached next card, stop
+                        if verbose:
+                            print(f"[verbose] Reached next card, stopping search", file=sys.stderr)
+                        break
+                    elif in_card_section and line.startswith("Active Profile:"):
+                        original_profile = line.split(":", 1)[1].strip()
+                        if verbose:
+                            print(f"[verbose] Found active profile: {original_profile}", file=sys.stderr)
+                        break
+                if verbose and not original_profile:
+                    print(f"[verbose] WARNING: Could not find active profile for card {card_name}", file=sys.stderr)
+            except (subprocess.CalledProcessError, FileNotFoundError, IndexError) as e:
+                if verbose:
+                    print(f"[verbose] Error getting current profile: {e}", file=sys.stderr)
+                original_profile = None
+            
             cmd = ["pactl", "set-card-profile", card_name, "pro-audio"]
+            if verbose:
+                print(f"[verbose] Setting profile to pro-audio: {cmd}", file=sys.stderr)
             try:
                 subprocess.run(cmd, check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
@@ -461,8 +507,50 @@ def main():
     # Add passthrough arguments (and expand their specifiers too)
     podman_args.extend([expand_specifiers(arg, context) for arg in passthrough_args])
 
-    # Execute
-    os.execvp(podman_args[0], podman_args)
+    # Execute - if audio was used and we changed the profile, restore it after
+    if use_audio and original_profile and card_name:
+        if verbose:
+            print(f"[verbose] Forking to run podman and restore profile afterwards", file=sys.stderr)
+            print(f"[verbose] Will restore profile '{original_profile}' to card '{card_name}' after podman exits", file=sys.stderr)
+        pid = os.fork()
+        if pid == 0:
+            # Child process: execute podman
+            try:
+                os.execvp(podman_args[0], podman_args)
+            except Exception as e:
+                print(f"Error executing podman: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            # Parent process: wait for child and restore profile
+            try:
+                os.waitpid(pid, 0)
+            except KeyboardInterrupt:
+                if verbose:
+                    print(f"[verbose] Received keyboard interrupt, still restoring profile", file=sys.stderr)
+                pass
+            finally:
+                # Restore original profile
+                if verbose:
+                    print(f"[verbose] Restoring profile '{original_profile}' to card '{card_name}'", file=sys.stderr)
+                try:
+                    subprocess.run(
+                        ["pactl", "set-card-profile", card_name, original_profile],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    if verbose:
+                        print(f"[verbose] Profile restored successfully", file=sys.stderr)
+                except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                    print(f"Warning: failed to restore audio profile: {e}", file=sys.stderr)
+    else:
+        # No audio or no profile to restore, just execute directly
+        if verbose:
+            if use_audio:
+                print(f"[verbose] Not forking (no profile to restore)", file=sys.stderr)
+            else:
+                print(f"[verbose] Not forking (no audio flag)", file=sys.stderr)
+        os.execvp(podman_args[0], podman_args)
 
 
 if __name__ == "__main__":
