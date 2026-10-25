@@ -1940,7 +1940,7 @@ körverk syns som meddelande i ekorutan."
   (when (executable-find "systemd-creds")
     (let ((key (string-trim
                 (shell-command-to-string
-                 "systemd-creds decrypt ~/.secrets/mistral"))))
+                 "systemd-creds --user decrypt ~/.secrets/mistral"))))
       (unless (string-empty-p key) key))))
 
 (use-package gptel :ensure
