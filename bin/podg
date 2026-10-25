@@ -1,0 +1,469 @@
+#!/usr/bin/env python3
+"""
+Run a podman container with display server and audio socket configuration.
+Supports systemd-style specifiers in string values.
+
+Features:
+- Automatic image building when image doesn't exist
+- Build configuration via PODG_BUILD_* environment variables
+- Volume mapping support via PODG_VOLUMES environment variable
+- Mapdirs support via PODG_MAPDIRS environment variable
+- Common configurations via flags (--audio)
+"""
+
+import os
+import sys
+import stat
+import subprocess
+import socket
+import pwd
+from pathlib import Path
+
+
+# ============================================================
+# Configuration - edit these to customize behavior
+# ============================================================
+
+# Host-specific audio card profiles: hostname -> card name
+# When --audio flag is used, runs: pactl set-card-profile <card_name> pro-audio
+HOST_AUDIO_CARDS = {
+    "himla": "alsa_card.usb-PreSonus_Studio_68c_0132DC89-00",
+    # Add more hosts as needed:
+    # "other-host": "some_card_name",
+}
+
+
+def get_uid() -> int:
+    return os.getuid()
+
+
+def get_gid() -> int:
+    return os.getgid()
+
+
+def get_username() -> str:
+    try:
+        return os.getlogin()
+    except OSError:
+        return pwd.getpwuid(os.getuid()).pw_name
+
+
+def get_machine_id() -> str:
+    try:
+        with open("/etc/machine-id", "r") as f:
+            return f.read().strip()
+    except (OSError, FileNotFoundError):
+        return ""
+
+
+def get_boot_id() -> str:
+    try:
+        with open("/proc/sys/kernel/random/boot_id", "r") as f:
+            return f.read().strip()
+    except (OSError, FileNotFoundError):
+        return ""
+
+
+def expand_specifiers(value: str, context: dict) -> str:
+    result = value
+    specifiers = {
+        "t": context.get("xrd", ""),
+        "h": os.path.expanduser("~"),
+        "v": os.path.join(os.path.expanduser("~"), ".volumes"),
+        "D": os.path.expanduser("HOST_XDG_STATE_HOME"),
+        "u": context.get("username", ""),
+        "U": str(context.get("uid", "")),
+        "g": context.get("groupname", ""),
+        "G": str(context.get("gid", "")),
+        "H": socket.gethostname(),
+        "m": context.get("machine_id", ""),
+        "b": context.get("boot_id", ""),
+    }
+    i = 0
+    output = []
+    while i < len(result):
+        if result[i] == "%" and i + 1 < len(result):
+            spec = result[i + 1]
+            if spec == "%":
+                output.append("%")
+                i += 2
+            elif spec in specifiers:
+                output.append(specifiers[spec])
+                i += 2
+            else:
+                output.append(result[i])
+                i += 1
+        else:
+            output.append(result[i])
+            i += 1
+    return "".join(output)
+
+
+def manager_env(name: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show-environment"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1]
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
+
+def is_socket(path: str) -> bool:
+    try:
+        return stat.S_ISSOCK(os.stat(path).st_mode)
+    except (OSError, FileNotFoundError):
+        return False
+
+
+def image_exists(image: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["podman", "image", "exists", image],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return result.returncode == 0
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def build_image(image: str, context: dict) -> bool:
+    build_file = os.environ.get("PODG_BUILD_FILE")
+    build_target = os.environ.get("PODG_BUILD_TARGET")
+
+    if not build_file:
+        print(f"Error: PODG_BUILD_FILE not set, cannot build image {image}", file=sys.stderr)
+        return False
+
+    build_file = expand_specifiers(build_file, context)
+
+    if not build_file:
+        print(f"Error: build_file is empty", file=sys.stderr)
+        return False
+
+    if not os.path.isfile(build_file):
+        print(f"Warning: Build file not found: {build_file}", file=sys.stderr)
+        return False
+
+    build_cmd = ["podman", "build"]
+
+    if build_target:
+        build_cmd.extend(["--target", build_target])
+
+    build_args = os.environ.get("PODG_BUILD_ARGS", "")
+    if build_args:
+        for arg in build_args.split(","):
+            arg = arg.strip()
+            if arg:
+                build_cmd.extend(["--build-arg", arg])
+
+    build_volumes = os.environ.get("PODG_BUILD_VOLUME", "")
+    if build_volumes:
+        for vol in build_volumes.split(","):
+            vol = vol.strip()
+            if vol:
+                vol = expand_specifiers(vol, context)
+                build_cmd.extend(["--volume", vol])
+
+    build_cmd.extend(["--tag", image])
+    build_cmd.extend(["--file", build_file])
+
+    try:
+        build_context = os.path.dirname(build_file)
+        build_cmd.append(build_context)
+    except Exception as e:
+        print(f"Error getting build context: {e}", file=sys.stderr)
+        return False
+
+    print(f"Building image {image}...", file=sys.stderr)
+    try:
+        result = subprocess.run(
+            build_cmd,
+            text=True,
+            timeout=300
+        )
+        if result.returncode != 0:
+            print(f"Build failed for {image}", file=sys.stderr)
+            return False
+        print(f"Successfully built {image}", file=sys.stderr)
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"Build timed out for {image}", file=sys.stderr)
+        return False
+    except FileNotFoundError:
+        print("podman command not found", file=sys.stderr)
+        return False
+
+
+def ensure_image(image: str, context: dict) -> bool:
+    if image_exists(image):
+        return True
+    return build_image(image, context)
+
+
+def parse_volumes(volumes_str: str, context: dict) -> list:
+    if not volumes_str:
+        return []
+    volumes = []
+    home = os.path.expanduser("~")
+    for vol in volumes_str.split(","):
+        vol = vol.strip()
+        if not vol:
+            continue
+        vol = expand_specifiers(vol, context)
+        if "=" in vol:
+            name, dest = vol.split("=", 1)
+            src = os.path.join(home, ".volumes", name)
+            try:
+                os.makedirs(src, exist_ok=True)
+            except OSError:
+                pass
+            if not dest.startswith("/") and not dest.startswith("~"):
+                dest = os.path.join(home, dest)
+            dest = os.path.expanduser(dest)
+            volumes.append(f"{src}:{dest}")
+        else:
+            parts = vol.split(":", 1)
+            if len(parts) == 2:
+                src, dest = parts
+                if not src.startswith("/") and not src.startswith("~"):
+                    src = os.path.join(home, src)
+                if not dest.startswith("/") and not dest.startswith("~"):
+                    dest = os.path.join(home, dest)
+                src = os.path.expanduser(src)
+                dest = os.path.expanduser(dest)
+                volumes.append(f"{src}:{dest}")
+            else:
+                volumes.append(vol)
+    return volumes
+
+
+def parse_mapdirs(mapdirs_str: str, context: dict) -> list:
+    if not mapdirs_str:
+        return []
+    volumes = []
+    home = os.path.expanduser("~")
+    for dirname in mapdirs_str.split(","):
+        dirname = dirname.strip()
+        if not dirname:
+            continue
+        dirname = expand_specifiers(dirname, context)
+        if not dirname.startswith("/") and not dirname.startswith("~"):
+            dirpath = os.path.join(home, dirname)
+        else:
+            dirpath = os.path.expanduser(dirname)
+        volumes.append(f"{dirpath}:{dirpath}")
+    return volumes
+
+
+def main():
+    uid = get_uid()
+    gid = get_gid()
+    xrd = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+    os.environ["XDG_RUNTIME_DIR"] = xrd
+
+    username = get_username()
+    groupname = None
+    try:
+        import grp
+        groupname = grp.getgrgid(gid).gr_name
+    except (ImportError, KeyError):
+        groupname = str(gid)
+
+    context = {
+        "xrd": xrd,
+        "uid": uid,
+        "gid": gid,
+        "username": username,
+        "groupname": groupname,
+        "machine_id": get_machine_id(),
+        "boot_id": get_boot_id(),
+    }
+
+    display = os.environ.get("DISPLAY") or manager_env("DISPLAY")
+    wayland_display = os.environ.get("WAYLAND_DISPLAY") or manager_env("WAYLAND_DISPLAY")
+    xauthority = os.environ.get("XAUTHORITY") or manager_env("XAUTHORITY")
+
+    if not wayland_display:
+        try:
+            for socket_path in Path(xrd).glob("wayland-*"):
+                if is_socket(str(socket_path)):
+                    wayland_display = socket_path.name
+                    break
+        except OSError:
+            pass
+
+    if not display:
+        x11_unix_path = Path("/tmp/.X11-unix")
+        if x11_unix_path.exists():
+            for socket_path in sorted(x11_unix_path.glob("X*")):
+                if is_socket(str(socket_path)):
+                    display_number = socket_path.name[1:]
+                    display = f":{display_number}"
+                    break
+
+    if not xauthority or not os.path.isfile(xauthority) or not os.access(xauthority, os.R_OK):
+        for auth_file in [f"{xrd}/.mutter-Xwaylandauth.*", f"{os.path.expanduser('~')}/.Xauthority"]:
+            if "*" in auth_file:
+                try:
+                    matches = list(Path(xrd).glob(".mutter-Xwaylandauth.*"))
+                    for match in matches:
+                        if os.access(str(match), os.R_OK):
+                            xauthority = str(match)
+                            break
+                except OSError:
+                    pass
+            else:
+                if os.path.isfile(auth_file) and os.access(auth_file, os.R_OK):
+                    xauthority = auth_file
+                    break
+
+    pipewire_remote = os.environ.get("PIPEWIRE_REMOTE") or "pipewire-0"
+
+    # Parse arguments
+    args = sys.argv[1:]
+    image = None
+    use_audio = False
+    passthrough_args = []
+
+    # Podman run flags that take a value
+    flags_with_value = {"--name", "--volume", "-v", "--env", "-e", "--tmpfs", "--build-arg", "--network", "--add-host", "--mount", "--workdir", "--user", "--security-opt"}
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--audio":
+            use_audio = True
+            i += 1
+        elif arg in flags_with_value and "=" not in arg:
+            # Flag that takes a separate value
+            passthrough_args.append(arg)
+            if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                passthrough_args.append(args[i + 1])
+                i += 2
+            else:
+                i += 1
+        elif arg.startswith("-"):
+            # Flag with = or standalone flag without value
+            passthrough_args.append(arg)
+            i += 1
+        else:
+            # Not a flag - could be image or command
+            if not image:
+                image = arg
+            passthrough_args.append(arg)
+            i += 1
+
+    # If we found an image, ensure it exists
+    if image and not image.startswith("-"):
+        if not ensure_image(image, context):
+            print(f"Error: Failed to ensure image {image} exists", file=sys.stderr)
+            sys.exit(1)
+
+    # Build podman args
+    podman_args = [
+        "podman",
+        "run",
+        "--tz=local",
+        "--userns=keep-id",
+        "--device=/dev/dri",
+        "--sdnotify=conmon",
+        "--cgroups=split",
+        "--security-opt=label=disable",
+        "-it",
+        f"--env=XDG_RUNTIME_DIR=%t",
+        "--user=1000",
+    ]
+
+    # Add audio-specific configurations
+    if use_audio:
+        # Host-specific audio profile setup
+        hostname = socket.gethostname()
+        if hostname in HOST_AUDIO_CARDS:
+            card_name = HOST_AUDIO_CARDS[hostname]
+            cmd = ["pactl", "set-card-profile", card_name, "pro-audio"]
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: audio setup failed for {hostname}: {e.stderr}", file=sys.stderr)
+            except FileNotFoundError:
+                print("Warning: pactl command not found", file=sys.stderr)
+        
+        podman_args.extend([
+            "--volume=/tmp:/tmp",
+            "--volume=/dev/snd:/dev/snd",
+            "--volume=/etc/hostname:/etc/hostname:ro",
+            "--volume=/etc/machine-id:/etc/machine-id:ro",
+            "--volume=/var/lib/dbus/machine-id:/var/lib/dbus/machine-id:ro",
+            "--env=GDK_BACKEND=x11",
+            "--env=LANG=sv_SE.UTF-8",
+            "--env=PIPEWIRE_LATENCY=128/44100",
+            "--ipc=host",
+        ])
+
+    # Add volumes from PODG_VOLUMES
+    podg_volumes = os.environ.get("PODG_VOLUMES", "")
+    if podg_volumes:
+        for vol in parse_volumes(podg_volumes, context):
+            podman_args.append(f"--volume={vol}")
+
+    # Add volumes from PODG_MAPDIRS
+    podg_mapdirs = os.environ.get("PODG_MAPDIRS", "")
+    if podg_mapdirs:
+        for vol in parse_mapdirs(podg_mapdirs, context):
+            podman_args.append(f"--volume={vol}")
+
+    # Add environment from PODG_ENV
+    podg_env = os.environ.get("PODG_ENV", "")
+    if podg_env:
+        for env_pair in podg_env.split(","):
+            env_pair = env_pair.strip()
+            if env_pair and "=" in env_pair:
+                podman_args.append(f"--env={env_pair}")
+
+    # Wayland
+    if wayland_display:
+        wayland_socket = f"{xrd}/{wayland_display}"
+        if is_socket(wayland_socket):
+            podman_args.extend([
+                f"--env=WAYLAND_DISPLAY={wayland_display}",
+                f"--volume={wayland_socket}:{wayland_socket}:rw",
+            ])
+
+    # X11
+    if display and xauthority and os.access(xauthority, os.R_OK) and os.path.isdir("/tmp/.X11-unix"):
+        podman_args.extend([
+            f"--env=DISPLAY={display}",
+            f"--env=XAUTHORITY={xauthority}",
+            f"--volume={xauthority}:{xauthority}:ro",
+            "--volume=/tmp/.X11-unix:/tmp/.X11-unix:rw",
+        ])
+
+    # PipeWire
+    pipewire_socket = f"{xrd}/{pipewire_remote}"
+    if is_socket(pipewire_socket):
+        podman_args.extend([
+            f"--env=PIPEWIRE_REMOTE={pipewire_remote}",
+            f"--volume={pipewire_socket}:{pipewire_socket}:rw",
+        ])
+
+    # Expand specifiers
+    podman_args = [expand_specifiers(arg, context) for arg in podman_args]
+
+    # Add passthrough arguments (and expand their specifiers too)
+    podman_args.extend([expand_specifiers(arg, context) for arg in passthrough_args])
+
+    # Execute
+    os.execvp(podman_args[0], podman_args)
+
+
+if __name__ == "__main__":
+    main()

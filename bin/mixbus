@@ -1,0 +1,17 @@
+#!/usr/bin/env fish
+# Set build configuration for podg
+set -x PODG_BUILD_FILE $HEM/imgs/musik/Containerfile
+set -x PODG_BUILD_TARGET mixbus
+
+# Set volumes (name=destination format)
+set -x PODG_VOLUMES "musik-.local=.local,musik-.cache=.cache,musik-.config=.config,mixbus-projects=projects,audio-clips=clips"
+
+# Set mapdirs
+set -x PODG_MAPDIRS "Hämtningar,Dokument,Musik"
+
+podg \
+    --audio \
+    --name mixbus \
+    --rm \
+    localhost/musik:mixbus \
+    bash -c "exec pw-jack /opt/Mixbus-*/bin/mixbus12 \"\$@\""
