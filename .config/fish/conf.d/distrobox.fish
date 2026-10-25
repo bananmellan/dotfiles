@@ -13,7 +13,7 @@ else
     if exists __distrobox_init_$CONTAINER_ID
         if not [ -f /.INIT ]
             __distrobox_init_$CONTAINER_ID
-            sudo touch /.INIT
+            run0 touch /.INIT
         end
     end
 end

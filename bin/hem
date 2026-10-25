@@ -1,0 +1,64 @@
+#!/usr/bin/env fish
+
+set SYNCTHING_VOLUME $HOME/.volumes/syncthing
+
+switch $argv[1]
+    case stow
+        if [ -d $HEM ]
+            stow --no-folding $argv[2..] -t $HOME -d $HEM .
+        end
+
+        if [ -d $HEM.crypt ]
+            stow $argv[2..] -t $HOME -d $HEM.crypt .
+        end
+
+        for d in $HEM-*/
+            set -l target $HOME/(string replace - / (string sub -s 6 (basename $d)))
+            pushd $d
+
+            if not [ -f .IGNORE ]
+                if [ -f .FOLD ]
+                    if not [ -L $target ]
+                        ln -vs $d $target
+                    end
+                else
+                    echo Stowing $d -\> $target
+                    stow --no-folding -t $target .
+                end
+            end
+
+            popd
+        end
+    case syncthing
+        podman run --name syncthing -d --privileged \
+            -v $HOME/.volumes/syncthing:/var/syncthing:z \
+            # (for d in $HOME/.hem*; echo -v$d:/var/syncthing/(basename $d):Z; end) \
+            --network=host \
+            --userns=keep-id \
+            $argv[2..] \
+            ghcr.io/syncthing/syncthing:latest
+    case setup
+        if not [ $SYNCTHING_VOLUME ]
+            set_color -o red; echo -n "ERROR"; set_color normal
+            echo : $SYNCTHING_VOLUME needs to exist, along with $SYNCTHING_VOLUME/.hem
+            exit 1
+        end
+
+        for d in (echo $SYNCTHING_VOLUME | sed "s|^$HOME/||")/.hem*
+            pushd $HOME
+            if not [ -e $(basename $d) ]
+                echo Linking $d -\> $PWD/$(basename $d)
+                ln -vs $d $(basename $d)
+            else
+                set_color -o green; echo -n 'Already linked'; set_color normal
+                echo ": $d"
+            end
+            popd
+        end
+
+        rm ~/.config/fish/config.fish
+
+        hem stow
+
+
+end

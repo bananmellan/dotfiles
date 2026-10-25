@@ -1,0 +1,21 @@
+#!/usr/bin/env fish
+# Set build configuration for podg
+set -x PODG_BUILD_FILE $HEM/imgs/musik/Containerfile
+set -x PODG_BUILD_TARGET ardour
+
+# Set volumes (name=destination format)
+set -x PODG_VOLUMES "musik-.local=.local,musik-.cache=.cache,musik-.config=.config,ardour-projects=ardour-projects,ardour-config=.config/ardour9,audio-clips=clips"
+
+# Set mapdirs
+set -x PODG_MAPDIRS "Hämtningar,Dokument,Musik"
+
+podg \
+    --audio \
+    --name ardour \
+    --rm \
+    localhost/musik:ardour \
+    (if test -n "$argv"
+        printf -- %argv
+    else
+        printf ardour9
+    end)

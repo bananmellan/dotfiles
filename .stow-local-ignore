@@ -4,6 +4,7 @@
 \.gitmodules
 päss
 nix
+imgs
 \.config/user-dirs.dirs
 \.VPNs
 kubes
@@ -16,3 +17,9 @@ bin
 \.stignore
 .+\.sync-conflict-.+
 fish_variables
+README.org
+LICENSE
+.*\.bk
+playbooks
+\.stversions
+volumes

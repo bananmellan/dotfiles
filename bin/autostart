@@ -2,20 +2,7 @@
 
 # pgrep firefox || flatpak run org.mozilla.firefox &
 pgrep darkman || darkman run &
-pgrep emacs || emacs &
+# exists protonvpn-app && protonvpn-app &
+# pgrep emacs || emacs &
 
-if podman container exists syncthing
-    podman start syncthing
-else
-    mkdir $HEM
-
-    podman run --name syncthing -d --privileged \
-        -v syncthing:/var/syncthing \
-        -v $HEM:/var/syncthing/.hem:Z \
-        ([ -d $HEM.crypt ] && \
-          printf "-v=$HEM.crypt:/var/syncthing/.hem.crypt:Z") \
-        --network=host \
-        -e=UID=1000 -e=GID=1000 \
-        --userns keep-id:uid=1000,gid=1000 \
-        docker.io/syncthing/syncthing:latest
-end
+# hem syncthing --replace

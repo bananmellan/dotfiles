@@ -1,0 +1,4 @@
+[flake8]
+extend-ignore = C901
+max-complexity = 100
+max-line-length = 10

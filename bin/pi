@@ -1,0 +1,15 @@
+#!/usr/bin/env fish
+set -l config_dir $HEM/volumes/pi-.pi-agent
+
+if not podman image exists pi-sandbox
+    echo "Building pi-sandbox image..."
+    podman build -t pi-sandbox -f $HEM/imgs/pi/Containerfile
+end
+
+podman run --rm -it \
+    -v "$PWD:/workspace:z" \
+    -v $config_dir:/root/.pi/agent:Z \
+    --security-opt label=disable \
+    pi-sandbox \
+    --append-system-prompt "$PWD from the host has been mounted into /workspace" \
+    $argv

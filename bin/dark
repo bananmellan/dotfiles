@@ -1,15 +1,32 @@
 #!/usr/bin/env fish
-if [ $argv[1] = y ]
-    set pref dark
-    set gtk -$pref
-else
-    set pref light
-    set -e gtk
+
+if [ -z $argv ]
+    set pref (dconf read /org/gnome/desktop/interface/color-scheme)
+
+    if [ $pref = "'prefer-dark'" ]
+        set argv n
+    else
+        set argv y
+    end
 end
 
-gsettings set org.gnome.desktop.interface color-scheme "prefer-$pref"
+switch $argv
+    case y
+        set shade dark
+        set pref prefer-$shade
+        set gtk -$shade
+    case n
+        set shade light
+        set pref default
+        set -e gtk
+    case '*'
+        echo ERROR: Specify y/n/
+        exit 1
+end
+
+dconf write /org/gnome/desktop/interface/color-scheme \'"$pref"\'
 gsettings set org.gnome.desktop.interface gtk-theme "Adwaita$gtk"
 
-if ! emacsclient > /dev/null 2>&1
-    emacsclient --eval "(my/$pref)"
+if [ -S /run/user/1000/emacs/server ]
+    emacsclient --eval "(my/$shade)" > /dev/null
 end

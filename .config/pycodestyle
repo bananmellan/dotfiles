@@ -1,0 +1,11 @@
+[pycodestyle]
+ignore = C901,W503,E722,MC0001,E501,E203,W293,E303
+# pylsp.plugins.flake8.enabled = false
+# pylsp.plugins.flake8.ignore = C901,M0001
+# pylsp.plugins.pycodestyle.enabled = true
+# pylsp.plugins.mccabe.enabled = false
+# pylsp.plugins.pyflakes.enabled = true
+# pylsp.plugins.mccabe.threshold = 100
+
+[mccabe]
+max_complexity = 100

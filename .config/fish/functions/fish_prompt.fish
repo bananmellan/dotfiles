@@ -1,7 +1,7 @@
 function prompt_suffix
     set -l fgp (fish_git_prompt)
-    # set -l ppwd (prompt_pwd --full-length-dirs 1)
-    set -l ppwd (dirs)
+    set -l ppwd (prompt_pwd --full-length-dirs 1)
+    # set -l ppwd (dirs)
 
     if [ $fgp ]
         set_color -o bryellow
@@ -16,11 +16,15 @@ function prompt_suffix
     set_color normal
 
     # if [ $TMUX ]
-        # tmux select-pane -T (prompt_pwd)
+    # tmux select-pane -T (prompt_pwd)
     # end
 end
 
 function fish_prompt
+    if [ $USER = root ]
+        set EMOJI 🦸🏻
+    end
+
     if [ $CONTAINER_ID ]
         set_color -o magenta
         printf "📦  $CONTAINER_ID  "
@@ -28,12 +32,14 @@ function fish_prompt
         set_color -o magenta
         printf "📦  "
     else if [ $SSH_CONNECTION ]
-        set_color yellow
-        printf "💻 ssh"
-        set_color normal
-        printf ":"
         set_color red
-        printf "$(hostname) "
+        printf "🌠 "
+        set_color blue
+        printf $USER
+        set_color normal
+        printf @
+        set_color purple
+        printf (hostname -s)' '
         set_color normal
     else
         set_color -o bryellow

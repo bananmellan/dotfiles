@@ -1,0 +1,600 @@
+#!/usr/bin/env fish
+#
+# backup.fish — personal backup script.
+#
+# Runs on boeka (Pixel, Termux). Everything is mirrored to bikupa
+# (boeka@bikupa). The script is intentionally modular: the himla modes that
+# were removed for now (mega/storj/proton/adb) can be re-added by following
+# the "Modes" section near the bottom.
+#
+# What --android does, in order:
+#
+#   1. Borg archive of the phone:
+#        $sdcard/Backup, $sdcard/Android/media, $HOME,
+#        $sdcard/.SeedVaultAndroidBackup
+#      → ssh://boeka@bikupa/var/lib/backup/telefon (create → prune → compact)
+#      The passphrase is fetched from bikupa with systemd-creds decrypt.
+#
+#   2. Mirror Signal backups:
+#        $sdcard/.molly → telefon-signalbackups
+#
+#   3. Mirror camera media and recordings, one bucket per year:
+#        $sdcard/DCIM/Camera     (current-year files) → telefon-DCIM/<year>
+#        $sdcard/DCIM/<year>     (archive)            → telefon-DCIM/<year>
+#        $sdcard/Audio Recorder  (current-year files) → telefon-inspelningar/<year>
+#        $sdcard/Audio Recorder/<year> (archive)      → telefon-inspelningar/<year>
+#
+# Year logic:
+#
+#   * On every run, files whose mtime year is not the current year are moved
+#     from the current directory into <archive-dir>/<file year>.
+#   * Only the current year is mirrored to bikupa. Older buckets on bikupa
+#     are never touched again.
+#   * Grace window: during the first $grace_months month(s) of the year, the
+#     previous year is mirrored as well, so files that land in the archive
+#     right after New Year still reach the server.
+#   * Safety net: each media tree records in $state_dir which previous year
+#     was last mirrored successfully. If the grace window was missed
+#     entirely (phone off, script not run), the next run after the window
+#     mirrors that year once (catch-up), then goes quiet again. Disable
+#     with: set catchup_if_window_missed false
+#
+# Runtime flags:
+#
+#   --verbose   more detail: borg create lists every file it considers,
+#               rsync prints transfer statistics, mkdir/mv print what they
+#               do, and decision-level debug output is shown.
+#
+#   --dry-run   preview without changing anything:
+#                 - mirrors run as rsync --dry-run (shows the transfer and
+#                   deletion list, writes nothing),
+#                 - Borg prune runs with --dry-run --list (reports which
+#                   archives the retention policy would delete),
+#                 - Borg create/compact are skipped (create --dry-run would
+#                   still scan every file on the phone),
+#                 - no files are moved, no directories or state files are
+#                   created.
+#               It still talks to bikupa over ssh (read-only): the
+#               passphrase fetch, prune preview and rsync previews all do.
+#
+# Error handling:
+#
+#   * Every step is wrapped in `must`, which aborts the whole script with a
+#     non-zero exit code as soon as anything fails.
+#   * Borg commands go through `must_borg` instead, which implements Borg's
+#     documented exit codes: rc 0 = success, rc 1 = warning ("operation
+#     reached its normal end, but there were warnings"), rc 2 = error.
+#     Warnings are not failures — the archive/operation succeeded — so they
+#     are logged and the script continues. Anything else aborts.
+#   * Borg's own volatile directories are excluded from the $HOME archive
+#     (see $borg_excludes) so that the known "nonce: file changed while we
+#     backed it up" warning cannot occur in the first place.
+#   * Two more situations are deliberately tolerated (warning only):
+#       - rsync exit code 24: files that vanished while the phone was in use.
+#       - a file that vanished between the find listing and its `mv`.
+#     Anything unexpected — including a find output line that cannot be
+#     parsed — aborts the run instead.
+#
+# Requirements on boeka (Termux):
+#
+#   pkg install borgbackup rsync openssh findutils coreutils
+#
+#   GNU find (findutils) is required by the archive step; the script checks
+#   for it and aborts with instructions if it is missing.
+#   Borg ≥ 1.4 is recommended (that is when BORG_EXIT_CODES appeared; older
+#   versions ignore the variable and already use the same legacy defaults).
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+# bikupa
+set -g srv boeka@bikupa
+
+# NOTE: $srv_backup_root includes the leading slash on purpose. Borg records
+# the exact repository location string and treats a different string as a
+# moved repository ("was previously located at ..."), so $borg_repo must
+# compose to EXACTLY:
+#     ssh://boeka@bikupa/var/lib/backup/telefon
+# Writing "ssh://$srv/$srv_backup_root/..." would insert a second slash and
+# change the string.
+set -g srv_backup_root /var/lib/backup
+set -g borg_repo "ssh://$srv$srv_backup_root/telefon"
+
+# Pin the exit-code scheme so `must_borg` can rely on fixed semantics:
+# 0 = success, 1 = warning, 2 = error. (Unknown to older borg versions,
+# which ignore it — their defaults are the same legacy scheme.)
+set -gx BORG_EXIT_CODES legacy
+
+# boeka
+set -g sdcard /sdcard
+
+# What goes into the Borg archive. NOTE: DCIM, Audio Recorder and .molly are
+# only rsync-mirrored today, never archived — consider adding them here as a
+# safety net:
+#   "$sdcard/DCIM" "$sdcard/Audio Recorder" "$sdcard/.molly"
+set -g borg_paths "$sdcard/Backup" "$sdcard/Android/media" "$HOME" "$sdcard/.SeedVaultAndroidBackup"
+
+# Borg's own volatile state must not be part of the $HOME archive: the
+# security nonce is rewritten on every commit and the cache changes during
+# every create, so including them makes borg warn about files that changed
+# while being backed up — on every run. The keys directory is deliberately
+# NOT excluded (that is the repokey cache and worth backing up).
+set -g borg_excludes "$HOME/.config/borg/security" "$HOME/.cache/borg"
+
+# Year-window behaviour
+set -g grace_months 1                # months into the year the previous year is still mirrored
+set -g catchup_if_window_missed true # mirror the previous year once if its window was missed
+set -g state_dir "$HOME/.local/state/backup"
+
+# Runtime flags — defaults, flipped by main from --verbose / --dry-run
+set -g verbose false
+set -g dry_run false
+
+# ---------------------------------------------------------------------------
+# Generic helpers
+# ---------------------------------------------------------------------------
+
+function log
+    echo "backup: $argv"
+end
+
+function warn
+    echo "backup: warning: $argv" >&2
+end
+
+function die
+    echo "backup: fatal: $argv" >&2
+    exit 1
+end
+
+# Run a command and abort the whole script if it exits non-zero.
+# Plain commands only — no pipes, redirects or command substitutions.
+function must
+    $argv
+    set -l code $status
+    if test $code -ne 0
+        die "command failed (exit $code): $argv"
+    end
+end
+
+# Run a borg command with warning-tolerant exit-code handling, per Borg's
+# documented return codes:
+#   rc 0          success
+#   rc 1          generic warning — the operation reached its normal end
+#                 (e.g. a file changed while being read); warn and continue
+#   rc 100..127   specific warnings (only in modern mode, but tolerated too)
+#   rc 2          generic error — abort
+#   rc 3..99      specific errors (modern mode) — abort
+#   rc 128+N      killed by signal N — abort
+function must_borg
+    $argv
+    set -l code $status
+    switch $code
+        case 0
+            return 0
+        case 1
+            warn "borg completed with warnings (exit 1) — operation succeeded, check the log above"
+            return 0
+        case '*'
+            if test $code -ge 100; and test $code -le 127
+                warn "borg completed with warnings (exit $code) — operation succeeded, check the log above"
+                return 0
+            end
+            die "borg failed (exit $code): $argv"
+    end
+end
+
+function usage
+    echo "usage: backup.fish [--android] [-v | --verbose] [-n | --dry-run] [-h | --help]"
+    echo
+    echo "modes:"
+    echo "  -a, --android     boeka (Termux): Borg archive + mirrors to bikupa"
+    echo
+    echo "options:"
+    echo "  -v, --verbose     detailed output (file lists, transfer stats, decisions)"
+    echo "  -n, --dry-run     preview only — nothing is written on boeka or bikupa"
+    echo "  -h, --help        show this help and exit"
+end
+
+function verbose_on
+    test "$verbose" = true
+end
+
+function dry_run_on
+    test "$dry_run" = true
+end
+
+# Detail output, only shown with --verbose.
+function debug
+    if verbose_on
+        echo "backup: debug: $argv"
+    end
+end
+
+# Report an action that --dry-run skips.
+function dry_note
+    echo "backup: [dry-run] $argv"
+end
+
+# Render a pattern list as rsync/rclone-style --exclude arguments.
+function exclude_args
+    for pattern in $argv
+        printf '%s\n' "--exclude=$pattern"
+    end
+end
+
+# ---------------------------------------------------------------------------
+# bikupa destinations
+# ---------------------------------------------------------------------------
+
+# Mirror the CONTENTS of <src>/ into <dst> on bikupa (rsync --delete).
+# Exit code 24 ("some files vanished before they could be transferred") is
+# treated as success with a warning: files disappearing while the phone is
+# in use are benign, and aborting the whole run over them would be worse.
+function srv_sync
+    set -l src $argv[1]
+    set -l dst $argv[2]
+    set -l excludes $argv[3..-1]
+
+    # set treats everything after the variable name as values, so flags
+    # starting with a dash can be built into a list directly.
+    set -l rsync_flags -avzp --delete
+    if verbose_on
+        set -a rsync_flags --stats
+    end
+    if dry_run_on
+        set -a rsync_flags --dry-run
+    end
+
+    if test (count $excludes) -gt 0
+        debug "rsync excludes: "(string join ', ' -- $excludes)
+    end
+
+    rsync $rsync_flags (exclude_args $excludes) "$src/" "$srv:$dst"
+    set -l code $status
+
+    switch $code
+        case 0
+            return 0
+        case 24
+            warn "rsync: some files vanished during transfer (exit 24) — treated as success"
+            return 0
+        case '*'
+            warn "rsync failed (exit $code)"
+            return 1
+    end
+end
+
+# Fan-out point for mirrors: when cloud destinations are re-added, dispatch
+# them here alongside srv_sync (see the Modes section).
+function rcmd
+    set -l src $argv[1]
+    set -l dst $argv[2]
+    set -l excludes $argv[3..-1]
+
+    if dry_run_on
+        log "would mirror $src → $srv:$dst (rsync --dry-run)"
+    else
+        log "mirroring $src → $srv:$dst"
+    end
+    srv_sync "$src" "$dst" $excludes
+end
+
+# ---------------------------------------------------------------------------
+# Borg
+# ---------------------------------------------------------------------------
+
+# Runs on bikupa over ssh; the secret is stored there with systemd-creds.
+# Read-only, so it runs in --dry-run too (the prune preview needs it).
+function fetch_borg_passphrase
+    log "fetching Borg passphrase from $srv"
+    set -gx BORG_PASSPHRASE (ssh $srv systemd-creds --user decrypt .secrets/borg-telefon)
+    if test -z "$BORG_PASSPHRASE"
+        die "could not fetch the Borg passphrase from $srv (empty output — check ssh and systemd-creds)"
+    end
+end
+
+function borg_backup
+    # In dry-run, only prune runs (read-only, as a preview of what the
+    # retention policy would delete). create --dry-run would still scan
+    # every source file on the phone, and compact --dry-run does nothing,
+    # so both are just reported.
+    if dry_run_on
+        log "would create Borg archive $borg_repo::boeka-{now:%Y-%m-%d_%H:%M:%S} of: $borg_paths"
+        log "prune preview (--dry-run)"
+        must_borg borg prune --dry-run --list --keep-weekly 4 --keep-monthly 4 "$borg_repo"
+        log "would compact $borg_repo"
+        return 0
+    end
+
+    log "creating Borg archive"
+    set -l create_flags --progress --stats --lock-wait 600
+    if verbose_on
+        # --list prints every file considered while the archive is built
+        set -a create_flags --list
+    end
+    for pattern in $borg_excludes
+        set -a create_flags --exclude $pattern
+    end
+    must_borg borg create $create_flags \
+        "$borg_repo::boeka-{now:%Y-%m-%d_%H:%M:%S}" \
+        $borg_paths
+
+    log "pruning"
+    must_borg borg prune --list --keep-weekly 4 --keep-monthly 4 "$borg_repo"
+    # Stronger policy to consider once the size impact is known:
+    #   --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --keep-yearly 2
+
+    log "compacting"
+    must_borg borg compact "$borg_repo"
+end
+
+# ---------------------------------------------------------------------------
+# Media: yearly archive + mirror
+# ---------------------------------------------------------------------------
+
+function in_grace_window --description 'True during the months right after a year switch'
+    test (math (date +%m)) -le $grace_months
+end
+
+function ensure_gnu_find --description 'Verify that GNU find (findutils) is available'
+    if find --version 2>/dev/null | string match -q '*GNU*'
+        return 0
+    end
+    warn "GNU find is required for the archive step (install with: pkg install findutils)"
+    return 1
+end
+
+# Move every top-level file in <curdir> whose mtime year is not the current
+# year into <arcdir>/<file year>. Files only — never directories, never
+# dotfiles (those stay put and are excluded from the mirrors).
+#
+# NOTE on the tab separator: fish does not expand escape sequences inside
+# quotes, so "\t" is literally backslash-t, not a tab. The tab is therefore
+# obtained from printf, which does interpret escapes. Getting this wrong
+# makes every split fail: the path ends up empty and mkdir creates junk
+# directories named "<year><TAB>..." under the archive dir.
+function archive_old_files
+    set -l curdir $argv[1]
+    set -l arcdir $argv[2]
+    set -l year (date +%Y)
+    set -l prev_year (math $year - 1)
+    set -l moved_years
+    set -l moved_count 0
+    set -l tab (printf '\t')
+
+    # -v makes mkdir/mv print each directory created / file moved
+    set -l v
+    if verbose_on
+        set -a v -v
+    end
+
+    set -l listing (find "$curdir" -maxdepth 1 -type f -not -name '.*' -printf '%TY\t%p\n')
+    if test $status -ne 0
+        die "find failed on '$curdir'"
+    end
+
+    debug "found "(count $listing)" file(s) in $curdir"
+
+    for entry in $listing
+        set -l parts (string split -m 1 -- "$tab" $entry)
+
+        # A listing line that cannot be parsed is a script/environment bug,
+        # not a vanished file — abort instead of silently skipping files.
+        if test (count $parts) -lt 2
+            die "could not parse find output line: '$entry' (expected '<year><TAB><path>')"
+        end
+
+        set -l file_year $parts[1]
+        set -l file $parts[2]
+
+        # Sanity-check the year so a broken parse can never create junk
+        # directories under the archive dir again.
+        if not string match -qr '^[0-9]{4}$' -- "$file_year"
+            die "unexpected year '$file_year' in find output — refusing to archive"
+        end
+
+        test "$file_year" = "$year"; and continue
+
+        if not test -e "$file"
+            # Vanished between the find listing and now — benign on a live
+            # phone, warn and move on.
+            warn "'$file' vanished during archiving — skipping"
+            continue
+        end
+
+        if dry_run_on
+            dry_note "would move '$file' → '$arcdir/$file_year/'"
+        else
+            if not mkdir $v -p "$arcdir/$file_year"
+                die "could not create '$arcdir/$file_year/'"
+            end
+
+            if not mv $v "$file" "$arcdir/$file_year/"
+                die "could not move '$file' into '$arcdir/$file_year/'"
+            end
+        end
+
+        set moved_count (math $moved_count + 1)
+        if not contains -- $file_year $moved_years
+            set -a moved_years $file_year
+        end
+    end
+
+    if test $moved_count -gt 0
+        if dry_run_on
+            log "would archive $moved_count file(s) from $curdir into "(string join ', ' $moved_years)
+        else
+            log "archived $moved_count file(s) from $curdir into "(string join ', ' $moved_years)
+        end
+    end
+
+    # Only the previous year is mirrored (during the window). Flag anything
+    # that ends up in the archive but will not reach bikupa.
+    for y in $moved_years
+        if test "$y" = "$prev_year"
+            if not in_grace_window
+                log "note: files from $y land in the archive after the grace window — they only reach bikupa if the last-year catch-up has not run yet"
+            end
+        else
+            warn "files from $y end up in '$arcdir/$y' but will NOT be mirrored (only $prev_year and $year are mirrored) — make sure they are covered by the Borg archive"
+        end
+    end
+end
+
+# Mirror the previous year's bucket:
+#   * during the grace window: on every run (idempotent),
+#   * after the window: once, if the window was missed (state file).
+# Usage: sync_previous_year <archive-dir> <target-dir> [exclude patterns...]
+function sync_previous_year
+    set -l arcdir $argv[1]
+    set -l trgdir $argv[2]
+    set -l excludes $argv[3..-1]
+    set -l prev_year (math (date +%Y) - 1)
+
+    test -d "$arcdir/$prev_year"; or return 0
+
+    # Per-tree state file, so each media tree tracks its own catch-up.
+    set -l state_file "$state_dir/prev-year-synced-"(path basename "$trgdir")
+    set -l last_synced
+    if test -f "$state_file"
+        set last_synced (cat "$state_file")
+    end
+
+    debug "catch-up state file: $state_file (last mirrored prev year: '$last_synced')"
+
+    if in_grace_window
+        log "grace window active — mirroring last year ($prev_year) as well"
+    else if test "$last_synced" = "$prev_year"
+        return 0
+    else if test "$catchup_if_window_missed" != true
+        return 0
+    else
+        log "grace window was missed — catching up on last year ($prev_year)"
+    end
+
+    must rcmd "$arcdir/$prev_year" "$trgdir/$prev_year" $excludes
+
+    # The state file is only written after a real successful mirror, so a
+    # dry-run never "uses up" a pending catch-up.
+    if dry_run_on
+        dry_note "would record catch-up state in $state_file"
+    else
+        must mkdir -p "$state_dir"
+        echo "$prev_year" > "$state_file"
+    end
+end
+
+# Orchestrate one media tree: archive old files → mirror current year →
+# mirror previous year when applicable.
+function media_sync
+    argparse 'c/current-dir=' 'a/archive-dir=' 't/target-dir=' 'e/exclude=+' -- $argv; or return 1
+
+    set -l curdir $_flag_current_dir
+    set -l arcdir $_flag_archive_dir
+    set -l trgdir $_flag_target_dir
+    set -l excludes $_flag_exclude
+
+    if not test -d "$curdir"
+        warn "'$curdir' does not exist — aborting"
+        return 1
+    end
+
+    if not ensure_gnu_find
+        return 1
+    end
+
+    set -l year (date +%Y)
+
+    archive_old_files "$curdir" "$arcdir"
+
+    log "mirroring current year ($year)"
+    must rcmd "$curdir" "$trgdir/$year" $excludes
+
+    sync_previous_year "$arcdir" "$trgdir" $excludes
+end
+
+# ---------------------------------------------------------------------------
+# Modes
+#
+# A mode is four things:
+#   1. a flag in main's argparse (e.g. 'm/mega'),
+#   2. a dispatch block in main,
+#   3. a line in usage(),
+#   4. its own function in this section, built from the helpers above.
+# All mutation must go through `must`/must_borg/rcmd/archive_old_files/
+# sync_previous_year so that --dry-run keeps working for free.
+#
+# Example — the removed mega mode, ready to paste back:
+#
+# function mega_sync
+#     for dir in (find ~/.backup/Bilder -mindepth 1 -maxdepth 1 -type d)
+#         set -l name (path basename "$dir")
+#         rclone sync --progress "$dir" "mega.crypt:/Bilder/$name"
+#     end
+# end
+# ---------------------------------------------------------------------------
+
+function android_backup
+    log "starting android backup"
+
+    fetch_borg_passphrase
+
+    borg_backup
+
+    log "mirroring Signal backups"
+    must rcmd "$sdcard/.molly" "$srv_backup_root/telefon-signalbackups"
+
+    log "syncing camera media"
+    must media_sync \
+        --current-dir "$sdcard/DCIM/Camera" \
+        --archive-dir "$sdcard/DCIM" \
+        --target-dir "$srv_backup_root/telefon-DCIM" \
+        --exclude ".trashed*" \
+        --exclude ".pending*"
+
+    log "syncing recordings"
+    must media_sync \
+        --current-dir "$sdcard/Audio Recorder" \
+        --archive-dir "$sdcard/Audio Recorder" \
+        --target-dir "$srv_backup_root/telefon-inspelningar" \
+        --exclude "*/"
+end
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+function main
+    argparse 'a/android' 'h/help' 'v/verbose' 'n/dry-run' -- $argv; or begin
+        usage
+        exit 2
+    end
+
+    if set -q _flag_help
+        usage
+        exit 0
+    end
+
+    if set -q _flag_verbose
+        set -g verbose true
+    end
+    if set -q _flag_dry_run
+        set -g dry_run true
+    end
+
+    if not set -q _flag_android
+        usage
+        die "no mode selected"
+    end
+
+    if dry_run_on
+        log "DRY RUN — nothing will be written on boeka or bikupa"
+    end
+
+    android_backup; or die "android backup failed"
+    log "all done"
+end
+
+main $argv

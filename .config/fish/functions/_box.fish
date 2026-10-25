@@ -3,7 +3,7 @@ function _box
         distrobox assemble create --file $HEM/.config/distroboxes/$argv[1].ini
     end
 
-    if [ "$(podman inspect box | jq .[0].State.Status)" != '"running"' ]
+    if [ (podman inspect $argv[1] | jq .[0].State.Status) != '"running"' ]
         podman start $argv[1] > /dev/null
     end
 

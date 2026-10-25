@@ -1,0 +1,51 @@
+# This is the configuration file for Ghostty.
+#
+# This template file has been automatically created at the following
+# path since Ghostty couldn't find any existing config files on your system:
+#
+#   /home/adam/.config/ghostty/config
+#
+# The template does not set any default options, since Ghostty ships
+# with sensible defaults for all options. Users should only need to set
+# options that they want to change from the default.
+#
+# Run `ghostty +show-config --default --docs` to view a list of
+# all available config options and their default values.
+#
+# Additionally, each config option is also explained in detail
+# on Ghostty's website, at https://ghostty.org/docs/config.
+
+# background = #1e1e1e
+background-opacity = 0.9
+theme = Modus Vivendi Tinted
+font-family = Monospace
+window-padding-x = 2,48
+window-padding-y = 2,48
+window-height = 30
+window-width = 100
+window-padding-balance = true
+window-inherit-font-size = false
+window-show-tab-bar = never
+window-decoration = true
+gtk-tabs-location = hidden
+# gtk-toolbar-style = raised
+font-size = 15
+# shell-integration = fish
+shell-integration-features = no-cursor
+cursor-style = block
+cursor-style-blink = true
+window-save-state = never
+
+# keybind = ctrl+t=new_tab
+# keybind = ctrl+tab=next_tab
+# keybind = alt+n=new_split:right
+# keybind = alt+m=new_split:right
+
+keybind = ctrl+ö=csi:ö
+
+scrollback-limit = 0
+scrollbar = never
+
+bell-features = no-audio, no-system
+
+desktop-notifications = false

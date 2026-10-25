@@ -3,8 +3,5 @@
 !bookmarks
 !config.org
 !*init.el
-!snippets/
-!snippets/**
-!var/
+snippets/
 var/**
-!var/bookmark-default.el

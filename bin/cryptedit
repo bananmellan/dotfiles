@@ -1,0 +1,15 @@
+#!/usr/bin/env fish
+
+if not [ $passphrase ]
+    read -gs passphrase
+end
+
+set -l src $argv[1]
+set -l trg (mktemp --suffix=.org)
+
+echo $trg
+chmod 600 $trg
+echo $passphrase | gpg --decrypt --batch --passphrase-fd 0 $src > $trg
+emacs $trg
+echo $passphrase | gpg -c --cipher-algo AES256 --batch --passphrase-fd 0 -o - $trg > $src
+shred -u $trg

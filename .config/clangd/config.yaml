@@ -1,2 +1,2 @@
 Diagnostics:
-  Suppress: ['pp_expr_bad_token_lparen', 'format', 'fatal_too_many_errors', 'pp_file_not_found', 'unknown_typename', 'unknown-pragmas']
+  Suppress: ['pp_expr_bad_token_lparen', 'format', 'fatal_too_many_errors', 'pp_file_not_found', 'unknown_typename', 'unknown-pragmas', 'char-subscripts', 'drv_unknown_argument_with_suggestion']

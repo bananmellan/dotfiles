@@ -1,5 +1,9 @@
 function fish_greeting
-    set -l TODAY (date -d '-6 hours' +%y%m%d)
+    if [ (uname) != Darwin ]
+        set TODAY (date -d '-6 hours' +%y%m%d)
+    else
+        set TODAY (date +%y%m%d)
+    end
 
     # Set todays emoji if it hasn't been set yet.
     if test -z "$EMOJI"

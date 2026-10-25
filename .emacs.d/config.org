@@ -1,33 +1,36 @@
+#+startup: fold
 #+title: Adams SkitEmacs
 * Init
 #+begin_src emacs-lisp
+;;; -*- lexical-binding: t; -*-
 ;; Start server unless already started
-(unless (file-exists-p "/run/host/run/user/1000/emacs/server")
+(unless (file-exists-p "/run/user/1000/emacs/server")
   (server-mode 1))
 
 (require 'package)
 (setq package-archives '(("melpa" . "https://melpa.org/packages/")
-                         ("elpa"  . "https://elpa.gnu.org/packages/")
-                         ("org"   . "https://orgmode.org/elpa/")))
-  #+end_src
+             ("elpa"  . "https://elpa.gnu.org/packages/")
+             ("org"   . "https://orgmode.org/elpa/")))
+#+end_src
 * General
 #+begin_src emacs-lisp
 ;; Put auto-generated code in custom.el.
-(if (string= system-type "gnu/linux")
-    (setq custom-file (expand-file-name "custom.el" user-emacs-directory))
-  (setq custom-file (expand-file-name "wcustom.el" user-emacs-directory)))
+;; (if (string= system-type "gnu/linux")
+;;     (setq custom-file (expand-file-name "custom.el" user-emacs-directory))
+;;   (setq custom-file (expand-file-name "wcustom.el" user-emacs-directory)))
+
+(setq custom-file (expand-file-name "custom.el" user-emacs-directory))
 
 (load custom-file)
 
 ;; Purge trailing whitespace before saving file.
-;; (add-hook 'before-save-hook 'whitespace-cleanup)
-;; (add-hook 'before-save-hook (lambda () (delete-trailing-whitespace)))
-;; NOTE: Using ws-butler now
+(add-hook 'before-save-hook 'whitespace-cleanup)
+(add-hook 'before-save-hook (lambda () (delete-trailing-whitespace)))
 
 (add-hook 'emacs-startup-hook
-          (lambda ()
-            (setq gc-cons-threshold 300000000 ; 300mb
-                  gc-cons-percentage 0.6)))
+      (lambda ()
+        (setq gc-cons-threshold 300000000 ; 300mb
+          gc-cons-percentage 0.6)))
 
 ;; Store backup files in cache.
 (setq my/backup-dir "~/.cache/emacs/")
@@ -37,14 +40,14 @@
 
 ;; Add prompt indicator to `completing-read-multiple'.
 ;; We display [CRM<separator>], e.g., [CRM,] if the separator is a comma.
-(defun crm-indicator (args)
-  (cons (format "[CRM%s] %s"
-                (replace-regexp-in-string
-                 "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
-                 crm-separator)
-                (car args))
-        (cdr args)))
-(advice-add #'completing-read-multiple :filter-args #'crm-indicator)
+;; (defun crm-indicator (args)
+;;   (cons (format "[CRM%s] %s"
+;;                 (replace-regexp-in-string
+;;                  "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
+;;                  crm-separator)
+;;                 (car args))
+;;         (cdr args)))
+;; (advice-add #'completing-read-multiple :filter-args #'crm-indicator)
 
 ;; Do not allow the cursor in the minibuffer prompt
 (setq minibuffer-prompt-properties
@@ -58,23 +61,30 @@
 #+begin_src emacs-lisp
 (column-number-mode 1)
 (global-subword-mode 1)
-(when window-system (fringe-mode 0))
+(when (featurep 'gtk) (fringe-mode 0))
 (show-paren-mode 1)
 (display-time-mode 0)
 (delete-selection-mode 0)
-(pending-delete-mode t)
+(pending-delete-mode 0)
 (global-auto-revert-mode 1)
 ;; (global-hl-line-mode 1)
 (save-place-mode 1)
 (line-number-mode 1)
-;; (winner-mode 1)
+(winner-mode 1)
 #+end_src
 * UI
 #+begin_src emacs-lisp
+(defvar my/gui‑available
+  (or (featurep 'x)               ; X11 support compiled in
+      (featurep 'gtk)             ; GTK support compiled in
+      window-system)              ; non‑nil if the current frame has a GUI
+  "Non‑nil when Emacs can display a graphical interface.")
+
 (use-package emacs
+  ;; :if window-system
 
   :init
-  (add-to-list 'default-frame-alist '(height . 42))
+  (add-to-list 'default-frame-alist '(height . 50))
   (add-to-list 'default-frame-alist '(width . 92))
 
   ;; Disable unwanted UI.
@@ -83,12 +93,45 @@
   (if (fboundp 'scroll-bar-mode) (scroll-bar-mode -1))
 
   ;; Remove line wrap symbol
-  (set-display-table-slot standard-display-table 'wrap ?\ ))
+  ;; (set-display-table-slot standard-display-table 'wrap ?\ )
+
+  ;; Could improve rendering performance
+  ;; (add-to-list 'default-frame-alist '(inhibit-double-buffering . t))
+
+  (set-frame-parameter nil 'alpha-background 92) ; For current frame
+  (add-to-list 'default-frame-alist '(alpha-background . 92)) ; For all new frames henceforth
+  )
 #+end_src
-* Theming
+** Mode line
+#+begin_src emacs-lisp
+(use-package doom-modeline :ensure
+  ;; :if (and (not (getenv "TERMUX_VERSION")) window-system)
+
+  :init
+  (use-package all-the-icons :ensure)
+  (doom-modeline-mode 1)
+
+  :custom
+  (doom-modeline-hud nil)
+  (doom-modeline-height 38)
+  (doom-modeline-project-detection 'auto)
+  (doom-modeline-position-column-line-format '("%l:%c"))
+  (doom-modeline-minor-modes nil)
+  (doom-modeline-enable-word-count nil)
+  (doom-modeline-total-line-number nil)
+  (doom-modeline-time nil)
+  (doom-modeline-buffer-encoding nil))
+
+(use-package hide-mode-line :ensure :defer
+  :hook ((eshell-mode . hide-mode-line-mode)
+     (vterm-mode . hide-mode-line-mode)
+     (occur-mode . hide-mode-line-mode)))
+#+end_src
+** Theming
 #+begin_src emacs-lisp
 (use-package modus-themes :ensure
-  :if window-system
+  ;; :if window-system
+
   :init
 
   ;; Activates dark theme.
@@ -101,7 +144,7 @@
   (if (string-match-p
        "dark"
        (shell-command-to-string
-        "gsettings get org.gnome.desktop.interface color-scheme"))
+    "gsettings get org.gnome.desktop.interface color-scheme"))
       (my/dark) (my/light))
 
   ;; Toggle light/dark theme.
@@ -112,6 +155,39 @@
    '((border-mode-line-active unspecified)
      (border-mode-line-inactive unspecified)))
   (modus-themes-to-toggle '(modus-operandi-tinted modus-vivendi-tinted)))
+#+end_src
+** Olivetti
+#+begin_src emacs-lisp
+(use-package olivetti :ensure
+  :config
+  (define-globalized-minor-mode global-olivetti-mode
+    olivetti-mode
+    (lambda ()
+      (unless (or (minibufferp)
+          (string-prefix-p " " (buffer-name))
+          (member major-mode '(comint-mode shell-mode)))
+    (olivetti-mode 1))))
+
+  (global-olivetti-mode 1)
+
+  ;; ALSO enable olivetti in active minibuffers when they are opened.
+  ;; This makes the minibuffer use olivetti's centered layout while it's active.
+  (add-hook 'minibuffer-setup-hook #'olivetti-mode)
+
+  ;; If you want to ensure it's turned off after a minibuffer session ends:
+  (add-hook 'minibuffer-exit-hook
+        (lambda ()
+          (when (bound-and-true-p olivetti-mode)
+        (olivetti-mode -1)))))
+#+end_src
+** Spacious Padding
+#+begin_src emacs-lisp
+(use-package spacious-padding :ensure
+  :config
+  (spacious-padding-mode t)
+  :custom
+  (spacious-padding-widths
+   '(:internal-border-width 16 :right-divider-width 32 :scroll-bar-width 8)))
 #+end_src
 * Variables
 #+begin_src emacs-lisp
@@ -129,6 +205,9 @@
 (setq
  ;; Move by logical lines
  line-move-visual nil
+
+ ;; Olivetti
+ fringes-outside-margins t
 
  ;; Show matching parantheses
  show-paren-mode t
@@ -178,6 +257,8 @@
  load-prefer-newer t
 
  org-agenda-overriding-header ""
+
+ ;; auth-sources '("~/.authinfo")
  )
 
 ;; Replaces yes-or-no prompts with y-or-n prompts
@@ -196,7 +277,7 @@
     (delete-region beg end)
     (insert (nreverse region))))
 #+end_src
-* Key bindings
+* ⌨️ Key bindings
 #+begin_src emacs-lisp
 (use-package emacs
   :bind
@@ -206,6 +287,7 @@
 
   ("C-å" . comment-line)
   ("C-ö" . undo)
+  ("M-[ ö" . undo)
   ("C-<odiaeresis>" . undo)
   ("C-;" . undo)
 
@@ -221,7 +303,9 @@
   ("C-x C-l" . nil) ;; Unset downcase region
   )
 #+end_src
-* Org Mode
+* 📦 Packages
+** Org Mode
+*** org-mode
 #+begin_src emacs-lisp
 (use-package org-mode
   :hook
@@ -230,17 +314,17 @@
   ;; (org-mode . (lambda() (org-cycle-hide-drawers 'all)))
 
   :bind (("C-c a" . org-agenda)
-         ;; ("C-z" . 'helm-select-action)
-         (:map org-mode-map
-               ("C-," . nil)
-               ("C-c c" . my/org-table-recalc)
-               ("M-n" . org-metadown)
-               ("M-p" . org-metaup)))
+     ;; ("C-z" . 'helm-select-action)
+     (:map org-mode-map
+           ("C-," . nil)
+           ("C-c c" . my/org-table-recalc)
+           ("M-n" . org-metadown)
+           ("M-p" . org-metaup)))
 
   :custom
-  ;, (org-display-inline-images t)
-  ;, (org-redisplay-inline-images t)
-  ;, (org-startup-with-inline-images "inlineimages")
+  (org-display-inline-images t)
+  (org-redisplay-inline-images t)
+  (org-startup-with-inline-images "inlineimages")
   (org-hide-emphasis-markers t)
   (org-image-actual-width 256)
 
@@ -249,7 +333,7 @@
   (org-agenda-skip-deadline-if-done t)
   (org-agenda-skip-scheduled-if-done t)
   (org-agenda-skip-timestamp-if-done t)
-  (org-agenda-span 'week)
+  (org-agenda-span 14)
   (org-agenda-sticky nil)
   (org-agenda-show-all-dates t)
   (org-agenda-window-setup 'current-window)
@@ -275,10 +359,15 @@
   (org-src-fontify-natively t)
   (org-src-preserve-indentation t)
   (org-src-tab-acts-natively t)
-  (org-startup-folded t)
+  (org-startup-folded 'show3levels)
 
-  (org-agenda-files (mapcar (lambda (f) (concat org-directory "/" f))
-                            '("agenda.org" "skola.org")))
+  (org-agenda-files
+   (cond
+    ((file-exists-p (concat org-directory "/agenda.org"))
+     (list (concat org-directory "/agenda.org")))
+    ((file-exists-p (concat org-directory "/agenda_arbete.org"))
+     (list (concat org-directory "/agenda_arbete.org")))))
+
   (org-deadline-warning-days 0)
   (org-agenda-custom-commands
    '(("d" "daily"
@@ -288,47 +377,59 @@
 
   :init
   (defun my/org-table-recalc () (interactive)
-         (org-table-recalculate-buffer-tables)
-         (org-table-recalculate 'iterate)
-         (org-table-recalculate-buffer-tables)
-         (org-table-recalculate-buffer-tables))
+     (org-table-recalculate-buffer-tables)
+     (org-table-recalculate 'iterate)
+     (org-table-recalculate-buffer-tables)
+     (org-table-recalculate-buffer-tables))
+
+  ;; (setq system-time-locale "sv_SE.UTF-8")
+  ;; (setq parse-time-months '(("jan" . 1) ("feb" . 2) ("mar" . 3) ("apr" . 4) ("maj" . 5) ("jun" . 6) ("jul" . 7) ("aug" . 8) ("sep" . 9) ("okt" . 10) ("nov" . 11) ("dec" . 12) ("januari" . 1) ("februari" . 2) ("mars" . 3) ("april" . 4) ("juni" . 6) ("juli" . 7) ("augusti" . 8) ("september" . 9) ("oktober" . 10) ("november" . 11) ("december" . 12)))
+  ;;
+  ;; (setq parse-time-weekdays '(("sön" . 0) ("mån" . 1) ("tis" . 2) ("ons" . 3) ("tor" . 4) ("fre" . 5) ("lör" . 6) ("söndag" . 0) ("måndag" . 1) ("tisdag" . 2) ("onsdag" . 3) ("torsdag" . 4) ("fredag" . 5) ("lördag" . 6)))
 
   (org-babel-do-load-languages
    'org-babel-load-languages
    '((python . t) (julia . t))))
 
-(use-package org-superstar :ensure
+(use-package org-superstar :ensure :if (not noninteractive)
   :hook ((org-mode . org-superstar-mode)))
 
-(use-package org-super-agenda :ensure
+;; (use-package org-modern :ensure)
+
+(use-package org-super-agenda :ensure :if (not noninteractive)
   :init (org-super-agenda-mode 1)
 
   :custom
   (org-super-agenda-header-separator "")
   (org-super-agenda-groups
    '((:name ""
-            :and (:date today :priority> "B")
-            :face (:foreground "#FF0000" :weight bold)
-            :order 0)
+        :and (:date today :priority> "B")
+        :face (:foreground "#FF0000" :weight bold)
+        :order 0)
      (:name "" :face (:priority> "B" :order 1))
      (:name "" :date today :order 10)
      (:name "" :and (:tag "lumen")
-            :time-grid t
-            :order 20)
+        :time-grid t
+        :order 20)
      (:name "" :anything t :order 100))))
 #+end_src
-** Org Roam
+*** org-ql
+#+begin_src emacs-lisp
+(use-package org-ql :ensure)
+#+end_src
+*** Org Roam
 #+begin_src emacs-lisp
 (use-package org-roam :ensure
   :hook
   (after-init . org-roam-db-autosync-mode)
-  ;; :init
-  ;; (org-roam-db-autosync-mode t)
+
   :bind
+  ("C-c r b" . org-roam-buffer-toggle)
   ("C-c r f" . org-roam-node-find)
   ("C-c r i" . org-roam-node-insert)
   ("C-c r c" . org-roam-capture)
   ("C-c r r" . org-roam-refile)
+  ("C-c r d d" . org-roam-dailies-goto-date)
   ("C-c r d c" . org-roam-dailies-capture-today)
   ("C-c r d g" . org-roam-dailies-goto-today)
   ("C-c r d t" . org-roam-dailies-goto-tomorrow)
@@ -336,30 +437,968 @@
   ("C-c r d p" . org-roam-dailies-goto-previous-note)
   ("C-c r d n" . org-roam-dailies-goto-next-note)
 
-  :custom
-  (org-roam-directory (file-truename org-directory))
-  (org-roam-completion-everywhere nil)
-  ;; (org-roam-completion-system 'default)
-  (org-roam-dailies-directory "journal/")
-  (org-roam-file-exclude-regexp "data/")
-  (org-roam-verbose nil)
+  :init
+  (setq org-roam-directory (file-truename org-directory))
+  (setq org-roam-completion-everywhere nil)
+  ;; (setq org-roam-completion-system 'default)
+  (setq org-roam-dailies-directory "journal/")
+  (setq org-roam-file-exclude-regexp "data/")
+  (setq org-roam-verbose nil)
 
-  (org-roam-capture-templates
-   '(("d" "default" plain "%?" :target
-      (file+head "%<%Y%m%d%H%M%S>-${slug}.org" "#+title: ${title}")
-      :unnarrowed t)))
+  (setq org-roam-capture-templates
+    '(("d" "default" plain "%?" :target
+       (file+head "%<%Y%m%d%H%M%S>-${slug}.org" "#+title: ${title}")
+       :unnarrowed t)))
 
-  (org-roam-dailies-capture-templates
-   '(("d" "default" entry
-      "* %?"
-      :target (file+head "%<%Y-%m-%d>.org"
-                         "#+title: %<%Y-%m-%d>\n"))))
+  (setq org-roam-dailies-capture-templates
+    '(("d" "default" plain "%?"
+       :target (file+head "%<%Y-%m-%d>.org"
+                  "#+title: %<%Y-%m-%d>\n\n"))))
 
-  (org-roam-node-display-template
-   (concat "${title:*} "
-           (propertize "${tags:10}" 'face 'org-tag))))
+  (setq org-roam-node-display-template
+    (concat "${title:*} "
+        (propertize "${tags:10}" 'face 'org-tag))))
 #+end_src
-** COMMENT Org Alert
+*** Böcker/film/etc
+**** init-media.el
+#+begin_src emacs-lisp
+;;; init-media.el --- bok- och filmrecensioner i org-roam -*- lexical-binding: t; -*-
+
+(require 'cl-lib)
+
+(defgroup my-media nil
+  "Bok- och filmrecensioner i org-roam-noder."
+  :group 'org)
+
+(defcustom my/media-books-node "Böcker"
+  "Titel eller alias på org-roam-noden för böcker."
+  :type 'string
+  :group 'my-media)
+
+(defcustom my/media-films-node "Filmer"
+  "Titel eller alias på org-roam-noden för filmer."
+  :type 'string
+  :group 'my-media)
+
+(defcustom my/media-agenda-title-column 30
+  "Bredd för titelkolumnen i media-agendan och i my-media-list-blocken.
+Titlar som är längre förkortas till denna bredd (med avslutande …).
+Gäller både Böcker- och Filmer-vyerna."
+  :type 'natnum
+  :group 'my-media)
+
+;;; Uppslagning av noderna ----------------------------------------------
+
+(defun my/media-node (node-title)
+  "Returnera org-roam-noden med titel eller alias NODE-TITLE.
+Uppslaget är skiftlägeskänsligt och titeln måste vara unik."
+  (require 'org-roam)
+  (or (org-roam-node-from-title-or-alias node-title)
+      (user-error "Ingen org-roam-nod med titeln %S (skapa noden, och kör M-x org-roam-db-sync om databasen är inaktuell)" node-title)))
+
+(defun my/media-file (node-title)
+  "Filen som backar org-roam-noden NODE-TITLE."
+  (org-roam-node-file (my/media-node node-title)))
+
+;;; Capture-mål ----------------------------------------------------------
+
+(defun my/media-capture-target (node-title)
+  "Org-capture-målfunktion: placera punkt i slutet av noden NODE-TITLE."
+  (set-buffer (org-capture-target-buffer (my/media-file node-title)))
+  (widen)
+  (goto-char (point-max))
+  (org-capture-put :exact-position (point))
+  (point))
+
+(defun my/books-capture-target ()
+  (my/media-capture-target my/media-books-node))
+
+(defun my/films-capture-target ()
+  (my/media-capture-target my/media-films-node))
+
+;;; Registrering av mallar och kommandon (om-inläsningssäkra) --------------
+;; add-to-list är en no-op om nyckeln redan finns, vilket gör att en
+;; om-inläsning av den här filen lämnar inaktuella mallar/kommandon kvar.
+;; Dessa hjälpfunktioner ersätter bara poster vars nyckel vi äger
+;; ("b", "f", "r", "R", "mb", "mf", "mF") – allt annat röras inte.
+
+(defun my/media-register-capture-template (template)
+  "Registrera eller uppdatera TEMPLATE i `org-capture-templates'.
+En befintlig mall med samma nyckel (bilen) ersätts; övriga mallar
+lämnas orörda."
+  (let ((key (car template)))
+    (setq org-capture-templates
+          (append
+           (cl-remove-if (lambda (e) (equal (car e) key))
+                         org-capture-templates)
+           (list template)))))
+
+(defun my/media-register-agenda-command (command)
+  "Registrera eller uppdatera COMMAND i `org-agenda-custom-commands'.
+Ett befintligt kommando med samma nyckel (bilen) ersätts; övriga
+kommandon lämnas orörda."
+  (let ((key (car command)))
+    (setq org-agenda-custom-commands
+          (append
+           (cl-remove-if (lambda (e) (equal (car e) key))
+                         org-agenda-custom-commands)
+           (list command)))))
+
+;;; Capture-mallar ---------------------------------------------------------
+
+(with-eval-after-load 'org-capture
+  (my/media-register-capture-template
+   '("b" "Bok → Böcker-noden" entry
+     (function my/books-capture-target)
+     "* SKALÄSA %^{Titel}\n:PROPERTIES:\n:AUTHOR: %^{Författare}\n:YEAR: %^{År}\n:ADDED: %U\n:ISBN: %^{ISBN}\n:END:\n%?"))
+  (my/media-register-capture-template
+   '("f" "Film → Filmer-noden" entry
+     (function my/films-capture-target)
+     "* SKASE %^{Titel}\n:PROPERTIES:\n:DIRECTOR: %^{Regissör}\n:YEAR: %^{År}\n:ADDED: %U\n:WHERE: %^{Var}\n:END:\n%?"))
+  (my/media-register-capture-template
+   '("r" "Recension: bok" entry
+     (function my/books-capture-target)
+     "* %^{Titel}\n:PROPERTIES:\n:RATING: %^{Betyg|5|6|7|8|9|10|4|3|2|1}\n:END:\n\n%?"))
+  (my/media-register-capture-template
+   '("R" "Recension: film" entry
+     (function my/films-capture-target)
+     "* %^{Titel}\n:PROPERTIES:\n:RATING: %^{Betyg|5|6|7|8|9|10|4|3|2|1}\n:END:\n\n%?")))
+
+;;; Agenda-kommandon -------------------------------------------------------
+;; En agendarad byggs av Org som prefix → TODO-nyckelord → rubrik, och
+;; rubriken ritas alltid sist. Titeln förkortas till
+;; `my/media-agenda-title-column' tecken och författaren/regissören
+;; flyttas till radslutet med `org-agenda-before-sorting-filter-function':
+;; den anropas med varje färdig agendarad (vars textegenskaper bl.a.
+;; innehåller org-hd-marker som pekar på posten), strax innan raderna
+;; sorteras och skrivs in, och returvärdet är den rad som visas. Alla
+;; textegenskaper kopieras med, så RET, t, q m.m. fungerar som vanligt.
+;;
+;; OBS: Org evaluerar värdena i inställningslistan vid körning, så
+;; funktionen måste refereras med #' (annars söks symbolnamnet upp som
+;; variabel och ger "Symbol's value as variable is void").
+
+(defun my/media-agenda-book-first (s)
+  "Förkorta titeln till `my/media-agenda-title-column' tecken och
+flytta författare/regissör till efter titeln i agendaraden S.
+Anropas av Org via `org-agenda-before-sorting-filter-function'.
+Returvärdet är den rad som sorteras och visas."
+  (let* ((marker (or (get-text-property 0 'org-hd-marker s)
+                     (get-text-property 0 'org-marker s)))
+         (who (and marker
+                   (or (org-entry-get marker "AUTHOR")
+                       (org-entry-get marker "DIRECTOR"))))
+         (title (and marker (org-entry-get marker "ITEM")))
+         (short (and title
+                     (my/media-truncate title my/media-agenda-title-column)))
+         (hit (and who (not (string= who "")) title short
+                   (string-match (regexp-quote title) s)
+                   (match-beginning 0)))
+         (rest (and hit (substring s (match-end 0))))
+         (pad (and short
+                   (max 2 (- my/media-agenda-title-column (length short)))))
+         (ins (and hit (concat (make-string pad ?\s) "—  " who
+                               (if (and rest (> (length rest) 0)
+                                        (= (aref rest 0) ?:))
+                                   " " ""))))
+         (new (and hit (concat (substring s 0 hit)
+                               short ins rest))))
+    (if new
+        (apply #'org-add-props new nil (text-properties-at 0 s))
+      s)))
+
+(with-eval-after-load 'org-agenda
+  (my/media-register-agenda-command
+   '("mb" "Böcker"
+     ((todo "LÄSER") (todo "SKALÄSA") (todo "LÄST") (todo "AVBRUTEN"))
+     ((org-agenda-files (list (my/media-file my/media-books-node)))
+      (org-agenda-prefix-format "  ")
+      (org-agenda-todo-keyword-format "%-10s")
+      (org-agenda-before-sorting-filter-function
+       #'my/media-agenda-book-first)
+      (org-overriding-columns-format
+       "%TODO %30ITEM(Titel) %30AUTHOR %8RATING"))))
+  (my/media-register-agenda-command
+   '("mf" "Filmer"
+     ((todo "SER") (todo "SKASE") (todo "SEDD") (todo "AVBRUTEN"))
+     ((org-agenda-files (list (my/media-file my/media-films-node)))
+      (org-agenda-prefix-format "  ")
+      (org-agenda-todo-keyword-format "%-10s")
+      (org-agenda-before-sorting-filter-function
+       #'my/media-agenda-book-first)
+      (org-overriding-columns-format
+       "%TODO %30ITEM(Titel) %25DIRECTOR %8RATING"))))
+  (my/media-register-agenda-command
+   '("mF" "Favoriter (betyg >= 8)"
+     ((tags "+favorite")))))
+
+;;; org-ql-vyer ------------------------------------------------------------
+
+(defun my/books-rated-high ()
+  "Lästa böcker med betyg 8 eller högre i Böcker-noden."
+  (interactive)
+  (org-ql-search (list (my/media-file my/media-books-node))
+    '(and (todo "LÄST")
+          (pred (> (string-to-number (or (org-entry-get nil "RATING") "0")) 7)))
+    :title "Böcker med betyg 8+"))
+
+(defun my/films-by-director ()
+  "Sedda filmer i Filmer-noden, sorterade på regissör."
+  (interactive)
+  (org-ql-search (list (my/media-file my/media-films-node))
+    '(todo "SEDD")
+    :title "Sedda filmer"
+    :sort '(property "DIRECTOR")))
+
+;;; Gemensamt för dynamiska block ------------------------------------------
+
+(defun my/media-todo-counts ()
+  "Räkna posterna per TODO-tillstånd i aktuell fil.
+Returnerar en alista ((TILLSTÅND . ANTAL) ...)."
+  (let ((counts '()))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (org-map-entries
+         (lambda ()
+           (let ((state (org-get-todo-state)))
+             (when state
+               (let ((cell (assoc state counts)))
+                 (if cell
+                     (setcdr cell (1+ (cdr cell)))
+                   (push (cons state 1) counts))))))
+         nil 'file)))
+    counts))
+
+(defun my/media-todo-keyword-order ()
+  "Alla TODO-nyckelord i aktuell buffert, i filens sekvensordning."
+  (when (and (boundp 'org-todo-keywords-1) (listp org-todo-keywords-1))
+    org-todo-keywords-1))
+
+(defun my/media-buffer-todo-keywords ()
+  "Autodetektera (SKA-PÅGÅ-KLART) ur buffertens aktuella TODO-sekvens.
+Första nyckelordet = \"ska\"-tillståndet, nyckelordet strax före det
+första klara = \"pågår\", första klara = \"klart\". Returnerar nil om
+bufferten saknar en TODO-sekvens med minst tre nyckelord."
+  (when (and (boundp 'org-todo-keywords-1) (listp org-todo-keywords-1)
+             (> (length org-todo-keywords-1) 2)
+             (boundp 'org-done-keywords) (listp org-done-keywords)
+             org-done-keywords)
+    (let* ((kws org-todo-keywords-1)
+           (done-first (car org-done-keywords))
+           (idx (cl-position done-first kws :test #'equal))
+           (reading (if (and idx (> idx 0))
+                        (nth (1- idx) kws)
+                      (car kws))))
+      (list (car kws) reading done-first))))
+
+(defun my/media-normalize-params (params)
+  "Normalisera dblock-parametrarna PARAMS till en alist med strängvärden.
+Org läser BEGIN-raden med `read', så nycklarna är nyckelord (:done) och
+nakna värden är symboler (:done LÄST -> symbolen LÄST). Återför allt
+till ((:done . \"LÄST\") ...). Tåler även alist-form."
+  (let ((out '())
+        (rest (and (listp params) params)))
+    (while rest
+      (let (key val)
+        (cond
+         ((consp (car rest))            ; alist-post ((:done . "LÄST"))
+          (setq key (car (car rest)) val (cdr (car rest)))
+          (setq rest (cdr rest)))
+         ((cdr rest)                    ; plist-par (:done LÄST)
+          (setq key (car rest) val (cadr rest))
+          (setq rest (cddr rest)))
+         (t (setq rest nil)))           ; udda längd – hoppa av
+        (when (and key val)
+          (let ((ks (cond ((keywordp key) (substring (symbol-name key) 1))
+                          ((symbolp key) (symbol-name key))
+                          ((stringp key) key)))
+                (vs (cond ((stringp val) val)
+                          ((numberp val) (number-to-string val))
+                          ((symbolp val) (symbol-name val))
+                          (t nil))))
+            (when (and ks vs)
+              (push (cons (intern (concat ":"
+                                          (if (string-prefix-p ":" ks)
+                                              (substring ks 1)
+                                            ks)))
+                          vs)
+                    out))))))
+    out))
+
+(defun my/media-param (params key default)
+  "Värde för KEY (t.ex. :done) ur normaliserade PARAMS, annars DEFAULT.
+Kan aldrig returnera nil eller tom sträng när DEFAULT är satt."
+  (let ((v (cdr (assoc key params))))
+    (if (and (stringp v) (not (string= v "")))
+        v
+      default)))
+
+;;; Dynamiskt block 1: statistik -------------------------------------------
+;;   #+BEGIN: my-media-stats
+;;   #+END:
+;; skriver "LÄST: 33 · LÄSER: 1 · SKALÄSA: 13 — totalt: 48" plus en
+;; "Övriga:"-rad för andra tillstånd som förekommer (t.ex. AVBRUTEN).
+
+(defun org-dblock-write:my-media-stats (params)
+  "Skriv antal poster per TODO-tillstånd i aktuell fil.
+Nyckelorden autodetekteras från filens #+TODO-rad; blockparametrarna
+:done, :reading och :todo kan åsidosätta. Övriga tillstånd listas
+automatiskt när de förekommer."
+  (let* ((np (my/media-normalize-params params))
+         (buf (my/media-buffer-todo-keywords))
+         (done-kw (my/media-param np :done (or (nth 2 buf) "LÄST")))
+         (reading-kw (my/media-param np :reading (or (nth 1 buf) "LÄSER")))
+         (todo-kw (my/media-param np :todo (or (nth 0 buf) "SKALÄSA")))
+         (counts (my/media-todo-counts))
+         (n (lambda (kw) (or (cdr (assoc kw counts)) 0)))
+         (n-done (funcall n done-kw))
+         (n-read (funcall n reading-kw))
+         (n-todo (funcall n todo-kw))
+         (extra (delq nil
+                      (mapcar (lambda (c)
+                                (unless (member (car c) (list done-kw reading-kw todo-kw))
+                                  c))
+                              counts)))
+         (extra-sum (apply #'+ (mapcar #'cdr extra)))
+         (total (+ n-done n-read n-todo extra-sum)))
+    (insert (format "%s: %d · %s: %d · %s: %d — totalt: %d"
+                    done-kw n-done reading-kw n-read todo-kw n-todo total))
+    (when extra
+      (insert (concat "\nÖvriga: "
+                      (mapconcat (lambda (c) (format "%s: %d" (car c) (cdr c)))
+                                 extra ", "))))))
+
+;;; Dynamiskt block 2: lista, en rad per titel ------------------------------
+;;   #+BEGIN: my-media-list
+;;   #+END:
+;; skriver "SKALÄSA  Kafka på stranden  —  Haruki Murakami" per post,
+;; kolumnjusterat och grupperat per tillstånd. Parametrar:
+;;   :field   property i högerkolumnen (default AUTHOR, använd DIRECTOR
+;;            i Filmer-noden)
+;;   :sort    state (default: grupperat i filens TODO-ordning), title,
+;;            author
+;;   :states  sträng med tillstånd som ska visas, t.ex. "SKALÄSA LÄSER"
+;;            (default: alla som förekommer)
+;;   :width   maxbredd för titelkolumnen; längre titlar förkortas med …
+;;            (default: my/media-agenda-title-column, just 30)
+
+(defun my/media-state-rank (state order)
+  (or (and order (cl-position state order :test #'equal)) 99))
+
+(defun my/media-truncate (s width)
+  "Förkorta S till högst WIDTH tecken, med avslutande … om det klipps."
+  (if (<= (length s) width)
+      s
+    (concat (substring s 0 (max 0 (- width 1))) "…")))
+
+(defun my/media-sort-key (entry sort-key order)
+  "Returnera sorteringsnyckelsträngen för ENTRY (state title who).
+SORT-KEY är \"state\", \"title\" eller \"author\"; ORDER är filens
+TODO-nyckelord i ordning. Nycklarna jämförs sedan med string-lessp,
+därav nollutfyllnaden av tillståndsrankningen."
+  (let ((state (nth 0 entry))
+        (title (downcase (nth 1 entry)))
+        (who (downcase (nth 2 entry))))
+    (cond
+     ((string= sort-key "title") title)
+     ((string= sort-key "author") (concat who "|" title))
+     (t (format "%02d|%s" (my/media-state-rank state order) title)))))
+
+(defun org-dblock-write:my-media-list (params)
+  "Skriv en rad per post: tillstånd, titel, författare/regissör.
+Se blockkommentaren ovan för parametrarna."
+  (let* ((np (my/media-normalize-params params))
+         (field (my/media-param np :field "AUTHOR"))
+         (sort-key (downcase (my/media-param np :sort "state")))
+         (states (let ((s (my/media-param np :states nil)))
+                   (and s (split-string s "[ \t,]+" t))))
+         (width (string-to-number
+                 (my/media-param np :width
+                                 (number-to-string
+                                  my/media-agenda-title-column))))
+         (order (my/media-todo-keyword-order))
+         (entries '()))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (org-map-entries
+         (lambda ()
+           (let ((state (or (org-get-todo-state) ""))
+                 (title (or (org-get-heading t t t t) ""))
+                 (who (org-entry-get (point) field)))
+             (when (and (not (string= title ""))
+                        (or (null states) (member state states)))
+               (push (list state title (or who "")) entries))))
+         nil 'file)))
+    (setq entries
+          (sort entries
+                (lambda (a b)
+                  (string-lessp (my/media-sort-key a sort-key order)
+                                (my/media-sort-key b sort-key order)))))
+    (when entries
+      (let* ((w-state (apply #'max 1 (mapcar (lambda (e) (length (nth 0 e)))
+                                             entries)))
+             (w-title (min width
+                           (apply #'max 1 (mapcar (lambda (e) (length (nth 1 e)))
+                                                  entries))))
+             (fmt (format "%%-%ds  %%-%ds  —  %%s" w-state w-title)))
+        (insert (mapconcat
+                 (lambda (e)
+                   (format fmt
+                           (nth 0 e)
+                           (my/media-truncate (nth 1 e) w-title)
+                           (nth 2 e)))
+                 entries "\n"))))))
+
+;;; Automatisk uppdatering av båda blocktyperna ----------------------------
+
+(defun my/media-update-dblocks ()
+  "Uppdatera alla my-media-block (statistik och lista) i aktuell buffert.
+Även interaktivt kommando."
+  (interactive)
+  (when (derived-mode-p 'org-mode)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (let ((positions '()))
+          (goto-char (point-min))
+          (while (re-search-forward
+                  "^[ \t]*#\\+BEGIN:[ \t]+my-media-\\(?:stats\\|list\\)" nil t)
+            (push (match-beginning 0) positions))
+          ;; Uppdatera bakifrån så att positioner inte förskjuts.
+          (dolist (pos (sort positions #'>))
+            (goto-char pos)
+            (ignore-errors (org-update-dblock))))))))
+
+;; Bakåtkompatibla namn (hakarna refererar till dem):
+(defun my/media-update-stats-block ()
+  (my/media-update-dblocks))
+
+(defun my/media-update-stats-on-todo-change ()
+  (my/media-update-dblocks))
+
+(add-hook 'org-after-todo-state-change-hook #'my/media-update-stats-on-todo-change)
+(add-hook 'before-save-hook #'my/media-update-stats-block)
+
+(defun my/media-insert-stats-block ()
+  "Infoga och uppdatera ett my-media-stats-block vid punkten."
+  (interactive)
+  (insert "#+BEGIN: my-media-stats\n#+END:\n")
+  (search-backward "#+BEGIN:")
+  (org-update-dblock))
+
+(defun my/media-insert-list-block ()
+  "Infoga och uppdatera ett my-media-list-block vid punkten."
+  (interactive)
+  (insert "#+BEGIN: my-media-list\n#+END:\n")
+  (search-backward "#+BEGIN:")
+  (org-update-dblock))
+
+(provide 'init-media)
+;;; init-media.el ends here
+#+end_src
+**** init-media-metadata.el
+#+begin_src emacs-lisp
+;;; init-media-metadata.el --- fyll bok- och filmmetadata från fria databaser -*- lexical-binding: t; -*-
+;; Böcker: Open Library (ingen nyckel krävs)
+;; Filmer: OMDb (gratis nyckel, 1000 anrop/dag) med Wikidata som nyckelfri reservkälla
+
+(require 'json)
+(require 'url)
+(require 'cl-lib)
+
+(defgroup my-media nil
+  "Bok- och filmrecensioner i org-roam."
+  :group 'org)
+
+(defcustom my/omdb-api-key nil
+  "API-nyckel till OMDb (gratis, 1000 anrop/dag: https://www.omdbapi.com/apikey.aspx).
+Om nil används Wikidata som nyckelfri källa för filmer."
+  :type '(choice (const :tag "Ingen nyckel (använd Wikidata)" nil)
+                 (string :tag "OMDb API-nyckel"))
+  :group 'my-media)
+
+(defvar my/media-user-agent
+  "init-media-metadata.el/1.0 (Emacs; personligt org-roam-bibliotek)"
+  "User-Agent för alla anrop (Wikidata kräver en beskrivande UA).")
+
+;;; HTTP + JSON ---------------------------------------------------------------
+
+(defun my/media-json-fetch (url)
+  "Hämta URL synkront och parsa JSON-kroppen.
+Objekt blir hash-tabeller med strängnycklar, arrayer blir listor."
+  (condition-case _err
+      (let ((url-request-extra-headers `(("User-Agent" . ,my/media-user-agent)))
+            (buf (url-retrieve-synchronously url nil nil 20)))
+        (unless buf (user-error "Kunde inte nå %s" url))
+        (unwind-protect
+            (with-current-buffer buf
+              (unless (and (boundp 'url-http-response-status)
+                           (numberp url-http-response-status)
+                           (<= 200 url-http-response-status 299))
+                (user-error "HTTP %s från %s" url-http-response-status url))
+              (goto-char url-http-end-of-headers)
+              (json-parse-buffer :object-type 'hash-table :array-type 'list))
+          (kill-buffer buf)))
+    ((json-parse-error json-error)
+     (user-error "Kunde inte tolka JSON från %s" url))))
+
+(defun my/media-j (obj key)
+  "Värdet för nyckeln KEY i JSON-objektet OBJ, eller nil."
+  (and (hash-table-p obj) (gethash key obj)))
+
+(defun my/media-hash-values (table)
+  (let (out)
+    (maphash (lambda (_k v) (push v out)) table)
+    (nreverse out)))
+
+(defun my/media-trim (s)
+  (setq s (replace-regexp-in-string "\\`[ \t\n\r]+" "" s))
+  (replace-regexp-in-string "[ \t\n\r]+\\'" "" s))
+
+(defun my/media-join-strings (strings)
+  "JSON-array av strängar -> komma-separerad sträng, eller nil."
+  (let ((s (and (listp strings)
+                (mapconcat #'identity
+                           (delq nil (mapcar (lambda (x) (and (stringp x) x)) strings))
+                           ", "))))
+    (and (stringp s) (not (string= s "")) s)))
+
+(defun my/media-join-objs (objs)
+  "JSON-array av {\"name\": ...}-objekt -> komma-separerad sträng, eller nil."
+  (and (listp objs)
+       (my/media-join-strings (mapcar (lambda (o) (my/media-j o "name")) objs))))
+
+(defun my/media-extract-year (s)
+  "Plocka ut ett årtal ur en datumsträng (t.ex. \"October 6, 2020\")."
+  (and (stringp s)
+       (string-match "[12][0-9]\\{3\\}" s)
+       (match-string 0 s)))
+
+;;; Org-posthjälp -------------------------------------------------------------
+
+(defun my/media-assert-entry ()
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Kör kommandot på en post i en org-buffert"))
+  (save-excursion (org-back-to-heading t)))
+
+(defun my/media-heading ()
+  (org-get-heading t t t t))
+
+(defun my/media-set-prop-if-empty (prop value)
+  "Sätt PROP till VALUE på posten vid punkt, men bara om PROP saknas eller är tom."
+  (let ((s (cond ((stringp value) value)
+                 ((numberp value) (number-to-string value))
+                 (value (format "%s" value))
+                 (t nil))))
+    (when (and s (not (string= s ""))
+               (let ((old (org-entry-get (point) prop)))
+                 (or (null old) (string= old ""))))
+      (org-entry-put (point) prop s))))
+
+(defun my/media-maybe-retitle (new-title)
+  (when (and (stringp new-title) (not (string= new-title ""))
+             (not (string= new-title (my/media-heading)))
+             (y-or-n-p "Byt rubriken %S till %S? " (my/media-heading) new-title))
+    (org-edit-headline new-title)))
+
+(defun my/media-add-tags (tags)
+  "Lägg till TAGS som lokala taggar på posten vid punkt."
+  (save-excursion
+    (org-back-to-heading t)
+    (dolist (tag tags)
+      (when (and (stringp tag) (not (string= tag "")))
+        (setq tag (downcase (string-replace " " "-" tag)))
+        (unless (member tag (org-get-tags t))
+          (org-toggle-tag tag 'on))))))
+
+;;; BÖCKER: Open Library --------------------------------------------------------
+
+(defun my/media-normalize-isbn (isbn)
+  (upcase (replace-regexp-in-string "[^0-9Xx]" "" isbn)))
+
+(defun my/media-openlibrary-isbn (isbn)
+  "Hämta bokdata för ISBN via Open Library Books API (jscmd=data)."
+  (let* ((resp (my/media-json-fetch
+                (format "https://openlibrary.org/api/books?bibkeys=ISBN:%s&format=json&jscmd=data" isbn)))
+         (data (my/media-j resp (concat "ISBN:" isbn))))
+    (unless (hash-table-p data)
+      (user-error "Open Library: ingen träff för ISBN %s" isbn))
+    data))
+
+(defun my/media-openlibrary-search (query)
+  "Fritextsök böcker på Open Library; returnerar lista av docs."
+  (let ((resp (my/media-json-fetch
+               (concat "https://openlibrary.org/search.json?limit=8"
+                       "&fields=title,key,author_name,first_publish_year,isbn,publisher,cover_i"
+                       "&q=" (url-hexify-string query)))))
+    (or (my/media-j resp "docs") '())))
+
+(defun my/media-book-from-isbn-data (data input-isbn)
+  (let* ((identifiers (my/media-j data "identifiers"))
+         (isbn13 (car (and (hash-table-p identifiers) (my/media-j identifiers "isbn_13"))))
+         (cover (my/media-j data "cover"))
+         (pages (my/media-j data "number_of_pages")))
+    (list :title (my/media-j data "title")
+          :authors (my/media-join-objs (my/media-j data "authors"))
+          :year (my/media-extract-year (my/media-j data "publish_date"))
+          :publisher (my/media-join-objs (my/media-j data "publishers"))
+          :pages (and (numberp pages) (number-to-string pages))
+          :isbn (or (and (stringp isbn13) isbn13) input-isbn)
+          :cover (or (my/media-j cover "large") (my/media-j cover "medium")))))
+
+(defun my/media-book-from-doc (doc)
+  (let* ((isbns (and (listp (my/media-j doc "isbn")) (my/media-j doc "isbn")))
+         (isbn13 (cl-find-if (lambda (s) (and (stringp s) (= (length s) 13))) isbns))
+         (cover-i (my/media-j doc "cover_i")))
+    (list :title (my/media-j doc "title")
+          :authors (my/media-join-strings (my/media-j doc "author_name"))
+          :year (let ((y (my/media-j doc "first_publish_year")))
+                  (and (numberp y) (number-to-string y)))
+          :publisher (my/media-join-strings (my/media-j doc "publisher"))
+          :pages nil
+          :isbn (or isbn13 (car-safe isbns))
+          :cover (and (numberp cover-i)
+                      (format "https://covers.openlibrary.org/b/id/%d-L.jpg" cover-i)))))
+
+(defun my/media-book-doc-line (doc)
+  (format "%s (%s) — %s"
+          (or (my/media-j doc "title") "?")
+          (or (let ((y (my/media-j doc "first_publish_year")))
+                (and (numberp y) (number-to-string y)))
+              "år okänt")
+          (or (my/media-join-strings (my/media-j doc "author_name"))
+              "okänd författare")))
+
+(defun my/media-book-fill-props (book)
+  (my/media-set-prop-if-empty "AUTHOR" (plist-get book :authors))
+  (my/media-set-prop-if-empty "YEAR" (plist-get book :year))
+  (my/media-set-prop-if-empty "PAGES" (plist-get book :pages))
+  (my/media-set-prop-if-empty "PUBLISHER" (plist-get book :publisher))
+  (my/media-set-prop-if-empty "ISBN" (plist-get book :isbn))
+  (my/media-set-prop-if-empty "COVER" (plist-get book :cover))
+  (my/media-maybe-retitle (plist-get book :title))
+  (message "Bokpost ifylld: %s" (plist-get book :title)))
+
+(defun my/book-fill-metadata ()
+  "Fyll bokposten vid punkt med metadata från Open Library.
+Inmatning som bara innehåller siffror/X/hyphens tolkas som ISBN,
+annars som fritextsökning där du väljer bland träffarna."
+  (interactive)
+  (my/media-assert-entry)
+  (let* ((heading (my/media-heading))
+         (query (my/media-trim
+                 (read-string (format "ISBN eller sökfråga [%s]: " heading)
+                              nil nil heading))))
+    (when (string= query "") (user-error "Tom fråga"))
+    (let ((book (if (string-match-p "\\`[0-9Xx-]\\{10,17\\}\\'" query)
+                    (let ((isbn (my/media-normalize-isbn query)))
+                      (my/media-book-from-isbn-data
+                       (my/media-openlibrary-isbn isbn) isbn))
+                  (let* ((docs (my/media-openlibrary-search query)))
+                    (unless docs (user-error "Open Library: inga träffar för %S" query))
+                    (let* ((lines (mapcar #'my/media-book-doc-line docs))
+                           (choice (completing-read "Välj bok: " lines nil t)))
+                      (my/media-book-from-doc
+                       (nth (cl-position choice lines :test #'equal) docs)))))))
+      (my/media-book-fill-props book))))
+
+;;; FILMER: OMDb (med nyckel) ----------------------------------------------------
+
+(defun my/media-omdb-request (params)
+  (unless (stringp my/omdb-api-key)
+    (user-error "Ingen OMDb-nyckel satt – sätt `my/omdb-api-key' eller låt den vara nil för Wikidata"))
+  (my/media-json-fetch
+   (concat "https://www.omdbapi.com/?apikey=" my/omdb-api-key "&" params)))
+
+(defun my/media-omdb-val (resp key)
+  (let ((v (my/media-j resp key)))
+    (and (stringp v) (not (member v '("N/A" ""))) v)))
+
+(defun my/media-film-from-omdb (resp)
+  (list :title (my/media-omdb-val resp "Title")
+        :director (my/media-omdb-val resp "Director")
+        :year (my/media-omdb-val resp "Year")
+        :imdb (my/media-omdb-val resp "imdbID")
+        :rating (my/media-omdb-val resp "imdbRating")
+        :genres (let ((g (my/media-omdb-val resp "Genre")))
+                  (and g (split-string g ", *" t)))))
+
+(defun my/media-omdb-film (title year)
+  "Slå upp TITLE (och ev. år YEAR) hos OMDb.
+Om exakt matchning misslyckas lista kandidater och hämta vald via IMDb-id."
+  (let* ((y (if (and year (not (string= year "")))
+                (concat "&y=" (url-hexify-string year)) ""))
+         (resp (my/media-omdb-request (concat "t=" (url-hexify-string title) y))))
+    (if (equal (my/media-j resp "Response") "True")
+        (my/media-film-from-omdb resp)
+      (let* ((search (my/media-omdb-request (concat "s=" (url-hexify-string title))))
+             (results (and (equal (my/media-j search "Response") "True")
+                           (my/media-j search "Search")))
+             (movies (and (listp results)
+                          (cl-remove-if-not
+                           (lambda (r) (equal (my/media-j r "Type") "movie"))
+                           results))))
+        (unless movies
+          (user-error "OMDb: %s" (or (my/media-j resp "Error") "ingen träff")))
+        (let* ((lines (mapcar (lambda (r)
+                                (format "%s (%s)"
+                                        (or (my/media-j r "Title") "?")
+                                        (or (my/media-j r "Year") "?")))
+                              movies))
+               (choice (completing-read "Välj film: " lines nil t))
+               (picked (nth (cl-position choice lines :test #'equal) movies)))
+          (my/media-film-from-omdb
+           (my/media-omdb-request
+            (concat "i=" (url-hexify-string (or (my/media-j picked "imdbID") ""))))))))))
+
+;;; FILMER: Wikidata (nyckelfri reservkälla) -------------------------------------
+;; Frågan är verifierad mot query.wikidata.org: P57 = regissör, P577 = premiärår,
+;; P345 = IMDb-id, Q11424 = film. Notera: exakt titel/aliasmatchning, därför
+;; versaliseras begynnelsebokstäverna automatiskt innan sökning.
+
+(defconst my/media-wikidata-sparql
+  "SELECT ?film ?filmLabel ?directorLabel ?year ?imdb WHERE {
+  { ?film rdfs:label \"%s\"@en } UNION { ?film rdfs:label \"%s\"@sv }
+  UNION { ?film skos:altLabel \"%s\"@en } UNION { ?film skos:altLabel \"%s\"@sv }
+  ?film wdt:P31/wdt:P279* wd:Q11424 .
+  OPTIONAL { ?film wdt:P57 ?director . }
+  OPTIONAL { ?film wdt:P577 ?date . BIND(YEAR(?date) AS ?year) }
+  OPTIONAL { ?film wdt:P345 ?imdb . }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language \"en,sv\". }
+}
+GROUP BY ?film ?filmLabel ?directorLabel ?year ?imdb
+LIMIT 10")
+
+(defun my/media-wikidata-value (binding key)
+  (let ((v (my/media-j binding key)))
+    (and (hash-table-p v) (my/media-j v "value"))))
+
+(defun my/media-film-merge (a b)
+  "Sammanfoga två träffrader för samma film (flera premiärdatum ger flera rader)."
+  (list :uri (or (plist-get a :uri) (plist-get b :uri))
+        :title (or (plist-get a :title) (plist-get b :title))
+        :director (or (plist-get a :director) (plist-get b :director))
+        :year (or (plist-get a :year) (plist-get b :year))
+        :imdb (or (plist-get a :imdb) (plist-get b :imdb))))
+
+(defun my/media-dedupe-films (films)
+  (let ((seen (make-hash-table :test 'equal)))
+    (dolist (f films)
+      (let* ((uri (plist-get f :uri))
+             (prev (and uri (gethash uri seen))))
+        (if prev
+            (puthash uri (my/media-film-merge prev f) seen)
+          (puthash uri f seen))))
+    (my/media-hash-values seen)))
+
+(defun my/media-wikidata-film (title)
+  (let* ((t-esc (replace-regexp-in-string "\"" "\\\\\"" title))
+         (tc (upcase-initials t-esc))
+         (query (format my/media-wikidata-sparql tc tc tc tc))
+         (url (concat "https://query.wikidata.org/sparql?format=json&query="
+                      (url-hexify-string query)))
+         (resp (my/media-json-fetch url))
+         (bindings (my/media-j (my/media-j resp "results") "bindings")))
+    (unless (and (listp bindings) bindings)
+      (user-error "Wikidata: inga träffar för %S (testa exakt stavning, t.ex. \"Dune: Part Two\")" title))
+    (my/media-dedupe-films
+     (mapcar (lambda (b)
+               (list :uri (my/media-wikidata-value b "film")
+                     :title (my/media-wikidata-value b "filmLabel")
+                     :director (my/media-wikidata-value b "directorLabel")
+                     :year (my/media-wikidata-value b "year")
+                     :imdb (my/media-wikidata-value b "imdb")))
+             bindings))))
+
+(defun my/media-film-from-wikidata (title)
+  (let* ((films (my/media-wikidata-film title))
+         (sorted (sort films
+                       (lambda (a b)
+                         (> (string-to-number (or (plist-get a :year) "0"))
+                            (string-to-number (or (plist-get b :year) "0"))))))
+         (lines (mapcar (lambda (f)
+                          (format "%s (%s) — %s"
+                                  (or (plist-get f :title) "?")
+                                  (or (plist-get f :year) "år?")
+                                  (or (plist-get f :director) "okänd regissör")))
+                        sorted))
+         (choice (completing-read "Välj film: " lines nil t))
+         (picked (nth (cl-position choice lines :test #'equal) sorted)))
+    (append picked (list :rating nil :genres nil))))
+
+;;; FILMER: gemensamt ------------------------------------------------------------
+
+(defun my/media-film-fill-props (film)
+  (my/media-set-prop-if-empty "DIRECTOR" (plist-get film :director))
+  (my/media-set-prop-if-empty "YEAR" (plist-get film :year))
+  (my/media-set-prop-if-empty "IMDB_ID" (plist-get film :imdb))
+  (my/media-set-prop-if-empty "IMDB_RATING" (plist-get film :rating))
+  (my/media-add-tags (plist-get film :genres))
+  (my/media-maybe-retitle (plist-get film :title))
+  (message "Filmpost ifylld: %s" (plist-get film :title)))
+
+(defun my/film-fill-metadata ()
+  "Fyll filmposten vid punkt med metadata.
+Använder OMDb om `my/omdb-api-key' är satt, annars Wikidata (nyckelfritt)."
+  (interactive)
+  (my/media-assert-entry)
+  (let* ((heading (my/media-heading))
+         (year-prop (org-entry-get (point) "YEAR"))
+         (title (my/media-trim
+                 (read-string (format "Filmtitel [%s]: " heading) nil nil heading)))
+         (year (my/media-trim
+                (read-string (format "År (valfritt, skiljer remake:ar åt) [%s]: "
+                                     (or year-prop ""))
+                             nil nil (or year-prop ""))))
+         (film (if my/omdb-api-key
+                   (my/media-omdb-film title year)
+                 (my/media-film-from-wikidata title))))
+    (my/media-film-fill-props film)))
+
+;;; Valfria snabbtangenter (avkommentera vid behov):
+;; (define-key org-mode-map (kbd "C-c C-x M-b") #'my/book-fill-metadata)
+;; (define-key org-mode-map (kbd "C-c C-x M-f") #'my/film-fill-metadata)
+
+(provide 'init-media-metadata)
+;;; init-media-metadata.el ends here
+#+end_src
+*** Ekonomi
+#+begin_src emacs-lisp
+;;; Ekonomi.org — omräkning + sortering av tabeller vid sparande
+
+(require 'cl-lib)
+
+(defconst my/org-ekonomi-sort-spec
+  '(("regelbundet" . "kpm")   ;; sorteras på kpm (månadskostnad), fallande
+    ("inkomst"     . "ipm")   ;; sorteras på ipm (månadsinkomst), fallande
+    ("innehav"     . "sek"))  ;; sorteras på sek (värde), fallande
+  "Tabeller som ska sorteras vid sparande: (TABELLNAMN . KOLUMNNAVN).
+Kolumnnamnet måste finnas i tabellens `!`-rad.")
+
+(defun my/org-ekonomi--collapse-tblfm-gaps ()
+  "Ta bort tomrader mellan tabeller och deras TBLFM-rader.
+Idempotent: en TBLFM-rad som redan ligger direkt under sin tabell
+matchas inte och lämnas orörd.  Hela avståndet (nyrad + tomrader +
+TBLFM-prefix) ersätts bokstavligen med exakt en nyrad."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (while (re-search-forward
+              "\n\\(?:[ \t]*\n\\)+[ \t]*#[+]TBLFM:" nil t)
+        (replace-match "\n#+TBLFM:" t t)))))
+
+(defun my/org-ekonomi--column-index (lines colname)
+  "Returnera kolumnindex för COLNAME enligt `!`-raden bland LINES.
+Matchningen är skiftlägesokänslig.  Returnerar nil om tabellen saknar
+`!`-rad eller om COLNAME inte finns i den."
+  (let* ((hrow (cl-find-if
+                (lambda (l)
+                  (equal (org-trim (or (nth 1 (split-string l "|")) "")) "!"))
+                lines)))
+    (when hrow
+      (cl-position-if (lambda (c)
+                        (equal (downcase (org-trim c)) (downcase colname)))
+                      (split-string hrow "|")))))
+
+(defun my/org-ekonomi--sort-named-table (name colname)
+  "Sortera dataraderna i tabellen NAME numeriskt på kolumnen COLNAME, fallande.
+Kolumnen väljs med namn enligt tabellens `!`-rad, så kolumnordningen i
+tabellen kan ändras fritt.  Dataraderna är raderna mellan de två
+första hline-raderna; rubrik-, hline- och summarader lämnas orörda.
+Tabeller utan två hline-rader lämnas helt orörda."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (let ((case-fold-search t))
+        (unless (re-search-forward
+                 (format "^[ \t]*#[+]NAME:[ \t]*%s[ \t]*$" (regexp-quote name))
+                 nil t)
+          (user-error "Hittar ingen tabell med namnet %s" name)))
+      (unless (re-search-forward "^[ \t]*|" nil t)
+        (user-error "Hittar ingen tabell efter #+NAME: %s" name))
+      (let* ((beg (line-beginning-position))
+             (end (progn (goto-char beg)
+                         (while (looking-at-p "[ \t]*|") (forward-line 1))
+                         (point)))
+             (lines (split-string
+                     (buffer-substring-no-properties beg end) "\n" t))
+             (col (or (my/org-ekonomi--column-index lines colname)
+                      (user-error
+                       "Tabellen %s har ingen kolumn med namnet %s (kräver en !-rad)"
+                       name colname)))
+             (hidx nil)
+             (i 0))
+        (dolist (l lines)
+          (when (string-match-p "\\`[ \t]*|[-+]" l)
+            (push i hidx))
+          (setq i (1+ i)))
+        (setq hidx (nreverse hidx))
+        (when (>= (length hidx) 2)
+          (let* ((lo (1+ (nth 0 hidx)))
+                 (hi (nth 1 hidx))
+                 (key (lambda (l)
+                        (string-to-number
+                         (org-trim (or (nth col (split-string l "|")) "")))))
+                 (data (sort (cl-subseq lines lo hi)
+                             (lambda (a b)
+                               (> (funcall key a) (funcall key b))))))
+            (setq lines (append (cl-subseq lines 0 lo)
+                                data
+                                (cl-subseq lines hi)))
+            (delete-region beg end)
+            (insert (mapconcat #'identity lines "\n") "\n")))))))
+
+(defun my/org-ekonomi-prepare ()
+  "Städa, omberäkna och sortera ekonomi-tabellerna i bufferten.
+Körs vid sparande via `before-save-hook' och kan även köras manuellt
+med M-x my/org-ekonomi-prepare.  Varje steg fångar sina fel var för
+sig, så ett problem i en tabell blockerar inte de övriga, och lyckat
+körverk syns som meddelande i ekorutan."
+  (interactive)
+  (condition-case err
+      (my/org-ekonomi--collapse-tblfm-gaps)
+    (error (message "Ekonomi: kunde inte städa tomrader: %s"
+                    (error-message-string err))))
+  (condition-case err
+      (org-table-iterate-buffer-tables)
+    (error (message "Ekonomi: kunde inte räkna om tabellerna: %s"
+                    (error-message-string err))))
+  (dolist (spec my/org-ekonomi-sort-spec)
+    (condition-case err
+        (my/org-ekonomi--sort-named-table (car spec) (cdr spec))
+      (error (message "Ekonomi: kunde inte sortera %s: %s"
+                      (car spec) (error-message-string err)))))
+  (message "Ekonomi: tabeller omräknade och sorterade"))
+#+end_src
+*** Org Agenda from dailies
+#+begin_src emacs-lisp
+(defun my/org-agenda-dailies ()
+  (let ((dir (concat (file-name-as-directory org-roam-directory) org-roam-dailies-directory))
+    (start (* 2 -365))
+    (end (* 2 365))
+    files)
+    (cl-loop for days from start to end
+         for f = (expand-file-name
+              (format-time-string "%Y-%m-%d.org"
+                      (time-add (current-time)
+                            (days-to-time days)))
+              dir)
+         when (file-exists-p f)
+         collect f into files
+         finally return files)))
+
+;; Hook it into the agenda dispatcher
+(advice-add 'org-agenda :before
+        (lambda (&rest _)
+          (setq org-agenda-files
+            (append (my/org-agenda-dailies)
+                org-agenda-files))))
+#+end_src
+*** COMMENT Org Alert
 #+begin_src emacs-lisp
 (use-package org-alert :ensure
   :config
@@ -371,21 +1410,21 @@
   (alert-default-style 'libnotify)
   (org-alert-match-string "SCHEDULED>=\"<today>\"+SCHEDULED<\"<tomorrow>\"|DEADLINE>=\"<today>\"+DEADLINE<\"<tomorrow>\""))
 #+end_src
-** COMMENT Org Pomodoro
+*** COMMENT Org Pomodoro
 #+begin_src emacs-lisp
 (use-package org-pomodoro :ensure
   :init
   (add-hook 'org-pomodoro-finished-hook
-            '(lambda () (notifications-notify
-                         :title "🍵" :body "Ta en paus."
-                         :sound-name "service-logout")))
+        '(lambda () (notifications-notify
+             :title "🍵" :body "Ta en paus."
+             :sound-name "service-logout")))
   (add-hook 'org-pomodoro-break-finished-hook
-            '(lambda () (notifications-notify
-                         :title "🤖" :body "Börja arbeta ditt kräk!"
-                         :sound-name "service-login")))
+        '(lambda () (notifications-notify
+             :title "🤖" :body "Börja arbeta ditt kräk!"
+             :sound-name "service-login")))
   (add-hook 'org-pomodoro-started-hook
-            '(lambda () (notifications-notify
-                         :title "🤖" :body "Pass påbörjat.")))
+        '(lambda () (notifications-notify
+             :title "🤖" :body "Pass påbörjat.")))
 
   :custom
   (org-pomodoro-finished-sound-p nil)
@@ -397,63 +1436,71 @@
   ("C-c p s" . org-pomodoro)
   ("C-c p e" . org-pomodoro-extend-last-clock))
 #+end_src
-** COMMENT Hide drawers
+*** COMMENT Hide drawers
 #+begin_src emacs-lisp
 (defun org-cycle-hide-drawers (state)
   "Re-hide all drawers after a visibility state change."
   (when (and (derived-mode-p 'org-mode)
-             (not (memq state '(overview folded contents))))
+         (not (memq state '(overview folded contents))))
     (save-excursion
       (let* ((globalp (memq state '(contents all)))
-             (beg (if globalp
-                      (point-min)
-                    (point)))
-             (end (if globalp
-                      (point-max)
-                    (if (eq state 'children)
-                        (save-excursion
-                          (outline-next-heading)
-                          (point))
-                      (org-end-of-subtree t)))))
-        (goto-char beg)
-        (while (re-search-forward org-drawer-regexp end t)
-          (save-excursion
-            (beginning-of-line 1)
-            (when (looking-at org-drawer-regexp)
-              (let* ((start (1- (match-beginning 0)))
-                     (limit
-                      (save-excursion
-                        (outline-next-heading)
-                        (point)))
-                     (msg (format
-                           (concat
-                            "org-cycle-hide-drawers:  "
-                            "`:END:`"
-                            " line missing at position %s")
-                           (1+ start))))
-                (if (re-search-forward "^[ \t]*:END:" limit t)
-                    (outline-flag-region start (point-at-eol) t)
-                  (user-error msg))))))))))
+         (beg (if globalp
+              (point-min)
+            (point)))
+         (end (if globalp
+              (point-max)
+            (if (eq state 'children)
+            (save-excursion
+              (outline-next-heading)
+              (point))
+              (org-end-of-subtree t)))))
+    (goto-char beg)
+    (while (re-search-forward org-drawer-regexp end t)
+      (save-excursion
+        (beginning-of-line 1)
+        (when (looking-at org-drawer-regexp)
+          (let* ((start (1- (match-beginning 0)))
+             (limit
+              (save-excursion
+            (outline-next-heading)
+            (point)))
+             (msg (format
+               (concat
+                "org-cycle-hide-drawers:  "
+                "`:END:`"
+                " line missing at position %s")
+               (1+ start))))
+        (if (re-search-forward "^[ \t]*:END:" limit t)
+            (outline-flag-region start (point-at-eol) t)
+          (user-error msg))))))))))
 #+end_src
-* Tree sitter
+** COMMENT Helm
+:LOGBOOK:
+- Refiled on [2024-02-03 lör 11:53]
+- Refiled on [2023-09-29 Fri 16:43]
+- Refiled on [2023-09-12 tis 19:31]
+- Refiled on [2023-09-12 tis 19:27]
+:END:
+#+begin_src emacs-lisp
+(use-package helm :ensure
+  :bind
+  ("M-x" . helm-M-x)
+  ("C-x m" . helm-man-woman)
+  ("C-x t" . helm-top)
+  )
+#+end_src
+** Tree sitter
 #+begin_src emacs-lisp
 (use-package treesit
   :custom (treesit-font-lock-level 3))
-
-(use-package treesit-auto :ensure
-  :custom
-  (treesit-auto-install t)
-  ;; (treesit-auto-langs '(c c++ julia bash json))
-
-  :config
-  (treesit-auto-add-to-auto-mode-alist 'all)
-  (global-treesit-auto-mode))
 #+end_src
 
-* Git
+** Git
 #+begin_src emacs-lisp
 (use-package magit :ensure :defer t
-  :bind ("C-x g" . magit-status))
+  :bind ("C-x g" . magit-status)
+  :init
+  (setopt magit-format-file-function #'magit-format-file-nerd-icons))
 
 (use-package blamer :ensure :defer t
   :bind (("C-c i" . blamer-show-commit-info))
@@ -463,10 +1510,14 @@
   (blamer-max-commit-message-length 64)
   (blamer-show-avatar-p nil))
 
-;; (use-package git-gutter
-;;   :ensure t)
+(use-package forge :ensure :after magit)
+
+(use-package magit-todos :ensure :after magit
+  :config (magit-todos-mode 1))
+
+;; (use-package git-gutter :ensure)
 #+end_src
-* Nerd Icons
+** Nerd Icons
 #+begin_src emacs-lisp
 (use-package nerd-icons :ensure)
 
@@ -474,9 +1525,10 @@
   :after (marginalia nerd-icons)
   :config
   (nerd-icons-completion-mode)
-  (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup))
+  (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup)
+  )
 #+end_src
-* Corfu
+** COMMENT Corfu
 #+begin_src emacs-lisp
 (use-package corfu :ensure
   ;; Optional customizations
@@ -502,27 +1554,40 @@
     (when (where-is-internal #'completion-at-point (list (current-local-map)))
       ;; (setq-local corfu-auto nil) ;; Enable/disable auto completion
       (setq-local corfu-echo-delay nil ;; Disable automatic echo and popup
-                  corfu-popupinfo-delay nil)
+          corfu-popupinfo-delay nil)
       (corfu-mode 1)))
 
   (add-hook 'minibuffer-setup-hook #'corfu-enable-in-minibuffer)
 
   :bind (:map corfu-map
-              ("RET" . nil)
-              ("SPC" . corfu-insert-separator)))
+          ("RET" . nil)
+          ("SPC" . corfu-insert-separator)))
 
-(use-package nerd-icons-corfu :ensure
-  :init
-  (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
+;; (use-package nerd-icons-corfu :ensure
+  ;; :init
+  ;; (add-to-list 'corfu-margin-formatters #'nerd-icons-corfu-formatter))
 #+end_src
-** Kind Icon
+*** Kind Icon
 #+begin_src emacs-lisp
-(use-package kind-icon
-  :ensure t
+(use-package kind-icon :ensure
   :after corfu
   :config (add-to-list 'corfu-margin-formatters #'kind-icon-margin-formatter))
 #+end_src
-* Vertico
+** Completion Preview
+#+begin_src emacs-lisp
+(use-package completion-preview
+  :if (package-installed-p 'completion-preview)
+  :init (global-completion-preview-mode)
+  :bind
+  (:map completion-preview-active-mode-map
+    ("M-n" . completion-preview-next-candidate)
+    ("M-p" . completion-preview-prev-candidate))
+  ;; (:map completion-list-mode-map
+  ;;       ("M-n" . minibuffer-next-completion)
+  ;;       ("M-p" . minibuffer-previous-completion))
+  )
+#+end_src
+** Vertico
 :LOGBOOK:
 - Refiled on [2023-09-16 lör 14:40]
 - Refiled on [2023-09-12 tis 19:31]
@@ -532,12 +1597,12 @@
 (use-package vertico :ensure
   :init (vertico-mode)
   :bind (:map vertico-map
-              ("C-l" . vertico-directory-up)
-              ("C-j" . vertico-directory-enter)))
+          ("C-l" . vertico-directory-up)
+          ("C-j" . vertico-directory-enter)))
 
 (use-package savehist :init (savehist-mode))
 #+end_src
-* Marginalia
+** Marginalia
 #+begin_src emacs-lisp
 ;; Enable rich annotations using the Marginalia package
 (use-package marginalia :ensure
@@ -545,7 +1610,7 @@
   ;; available in the *Completions* buffer, add it to the
   ;; `completion-list-mode-map'.
   :bind (:map minibuffer-local-map
-              ("M-A" . marginalia-cycle))
+          ("M-A" . marginalia-cycle))
 
   ;; The :init section is always executed.
   :init
@@ -555,17 +1620,17 @@
   ;; package.
   (marginalia-mode))
 #+end_src
-* All-the-icons
+** COMMENT All-the-icons
 #+begin_src emacs-lisp
 (use-package all-the-icons :ensure
   :if (display-graphic-p))
 
-;; (use-package all-the-icons-completion :ensure
-  ;; :after (marginalia all-the-icons)
-  ;; :hook  (marginalia-mode . all-the-icons-completion-marginalia-setup)
-  ;; :init  (all-the-icons-completion-mode))
+(use-package all-the-icons-completion :ensure
+  :after (marginalia all-the-icons)
+  :hook  (marginalia-mode . all-the-icons-completion-marginalia-setup)
+  :init  (all-the-icons-completion-mode))
 #+end_src
-* Orderless
+** Orderless
 #+begin_src emacs-lisp
 (use-package orderless :ensure
   :init
@@ -573,18 +1638,14 @@
   ;; (setq orderless-style-dispatchers '(+orderless-consult-dispatch orderless-affix-dispatch)
   ;;       orderless-component-separator #'orderless-escapable-split-on-space)
   (setq completion-styles '(orderless basic)
-        completion-category-defaults nil
-        completion-category-overrides '((file (styles partial-completion)))))
+    completion-category-defaults nil
+    completion-category-overrides '((file (styles partial-completion)))))
 #+end_src
-* No Littering
+** No Littering
 #+begin_src emacs-lisp
 (use-package no-littering :ensure)
 #+end_src
-* ws-butler
-#+begin_src emacs-lisp
-(use-package ws-butler :ensure :init (ws-butler-global-mode))
-#+end_src
-* Eglot
+** Eglot
 #+begin_src emacs-lisp
 (use-package eglot
   :if (not (getenv "TERMUX_VERSION"))
@@ -598,105 +1659,310 @@
     python-ts-mode
     java-ts-mode) . eglot-ensure)
 
-  :ensure-system-package
-  ((clangd . "fish -c 'i -y clang-tools-extra'"))
-
   :custom
   (eldoc-echo-area-use-multiline-p 1)
   (eldoc-idle-delay 0.05)
   (eglot-ignored-server-capabilities '(:inlayHintProvider))
+  (eglot-report-progress nil)
 
   :bind (:map eglot-mode-map
-              ("C-c v" . eglot-rename)
-              ("C-c d" . eglot-find-declaration)))
+          ("C-c v" . eglot-rename)
+          ("C-c d" . eglot-find-declaration)))
 
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
-               '(c-mode . ("clangd" "-header-insertion=never"))
-               '(c-ts-mode . ("clangd" "-header-insertion=never"))))
+           '(c-mode . ("clangd" "-header-insertion=never"))
+           '(c-ts-mode . ("clangd" "-header-insertion=never"))))
 
 ;; Help clangd to find stuff
-(setenv "CPATH" "/usr/include")
+(setenv "CPATH" "/usr/lib/arm-none-eabi/include/")
 #+end_src
-* Mode line
+** Try
 #+begin_src emacs-lisp
-(use-package doom-modeline :ensure
-  :if (not (getenv "TERMUX_VERSION"))
-
-  :init
-  (use-package all-the-icons :ensure)
-  (doom-modeline-mode 1)
-
-  :custom
-  (doom-modeline-hud nil)
-  (doom-modeline-height 38)
-  (doom-modeline-project-detection 'auto)
-  (doom-modeline-position-column-line-format '("%l:%c"))
-  (doom-modeline-minor-modes nil)
-  (doom-modeline-enable-word-count nil)
-  (doom-modeline-total-line-number nil)
-  (doom-modeline-time nil)
-  (doom-modeline-buffer-encoding nil))
-
-(use-package hide-mode-line
-  :ensure t
-  :defer t
-  :hook ((eshell-mode . hide-mode-line-mode)
-         (vterm-mode . hide-mode-line-mode)
-         (occur-mode . hide-mode-line-mode)))
+(use-package try :defer t :ensure :commands (try try-and-refresh))
 #+end_src
-* Try
-#+begin_src emacs-lisp
-(use-package try :ensure :commands (try try-and-refresh))
-#+end_src
-* Which Key
+** Which Key
 #+begin_src emacs-lisp
 (use-package which-key :ensure
   :init (which-key-mode))
 #+end_src
-* YASnippet
+** YASnippet
 #+begin_src emacs-lisp
 (use-package yasnippet :ensure
+  :if (not (string-equal system-name "localhost"))
   :init
   (let ((yas-dir (concat (getenv "HEM") "/.emacs.d/snippets")))
     (add-to-list 'yas-snippet-dirs yas-dir))
   (yas-global-mode 1))
 #+end_src
-* VTerm
+** Flymake
 #+begin_src emacs-lisp
-(use-package vterm :ensure
-  :if (and (not (getenv "TERMUX_VERSION")) (executable-find "cmake"))
-
+(use-package flymake :defer t
   :bind
-  ("C-z b" . (lambda () (interactive) (my/vterm-box "box")))
-  ("C-z d" . (lambda () (interactive) (my/vterm-box "debian")))
+  ("C-c e n" . flymake-goto-next-error)
+  ("C-c e p" . flymake-goto-prev-error))
+#+end_src
+** Expand region
+#+begin_src emacs-lisp
+(use-package expand-region :ensure :defer t
+  :bind ("M-o" . er/expand-region))
+#+end_src
+** Multiple Cursor
+#+begin_src emacs-lisp
+(use-package multiple-cursors :ensure :defer t
+  :bind
+  ("C-S-c C-S-c" . mc/edit-lines)
+  ("C-\>" . mc/mark-next-like-this)
+  ("C-\<" . mc/mark-previous-like-this)
+  :init
+  (global-set-key (kbd "C-c C-<") 'mc/mark-all-like-this))
+#+end_src
+** Nov
+#+begin_src emacs-lisp
+(use-package nov :ensure :defer t
+  :init (add-to-list 'auto-mode-alist '("\\.epub\\'" . nov-mode)))
+#+end_src
+** Dired
+#+begin_src emacs-lisp
+(use-package dired
+  :hook (dired-mode . dired-hide-details-mode)
 
-  :ensure-system-package
-  ((cmake . "fish -c 'i -y cmake'")
-   (libtool . "fish -c 'i -y libtool'"))
+  :custom
+  (dired-mouse-drag-files t)
+  (dired-dwim-target t)
+  (dired-auto-revert-buffer t)
+  (delete-by-moving-to-trash t)
+  ;; (setq ls-lisp-use-insert-directory-program nil)
+  :bind (:map dired-mode-map
+          ("<C-j>" . dired-find-file)
+          ("<C-l>" . dired-up-directory)))
+
+;; (use-package dired-subtree :ensure :after dired
+  ;; :bind (:map dired-mode-map
+          ;; ("<tab>" . dired-subtree-toggle)
+          ;; ("<C-tab>" . dired-subtree-cycle)))
+
+(use-package nerd-icons-dired :ensure :after dired
+  :hook (dired-mode . nerd-icons-dired-mode))
+
+(use-package dired-hide-dotfiles :ensure :after dired
+  :hook (dired-mode . dired-hide-dotfiles-mode)
+  :bind (:map dired-mode-map ("C-." . dired-hide-dotfiles-mode)))
+
+;; (use-package dired-collapse :ensure :after dired
+;;   :hook (dired-mode . dired-collapse-mode))
+
+(use-package dired-k :ensure :after dired
+  :config
+  ; always execute dired-k when dired buffer is opened
+  (add-hook 'dired-initial-position-hook 'dired-k))
+#+end_src
+
+*** COMMENT Dirvish
+#+begin_src emacs-lisp
+(use-package dirvish :ensure
+  :init
+  (dirvish-override-dired-mode)
+  :config
+  (setq dirvish-mode-line-format
+    '(:left (sort symlink) :right (omit yank index)))
+  (setq dirvish-mode-line-height 10)
+  (setq dirvish-attributes
+    '(nerd-icons file-time file-size collapse subtree-state vc-state git-msg))
+  (setq dirvish-subtree-state-style 'nerd)
+  (setq delete-by-moving-to-trash t)
+  (setq dirvish-path-separators (list
+                 (format "  %s " (nerd-icons-codicon "nf-cod-home"))
+                 (format "  %s " (nerd-icons-codicon "nf-cod-root_folder"))
+                 (format " %s " (nerd-icons-faicon "nf-fa-angle_right"))))
+  (setq dired-listing-switches
+    "-l --almost-all --human-readable --group-directories-first --no-group")
+  (dirvish-peek-mode) ; Preview files in minibuffer
+  (dirvish-side-follow-mode) ; similar to `treemacs-follow-mode'
+)
+#+end_src
+** Eshell
+#+begin_src emacs-lisp
+(use-package eshell :ensure nil :defer t)
+
+(use-package eshell-syntax-highlighting :ensure :after eshell
+  :config
+  (eshell-syntax-highlighting-global-mode +1)
+  :init
+  (defface eshell-syntax-highlighting-invalid-face
+    '((t :inherit diff-error))
+    "Face used for invalid Eshell commands."
+    :group 'eshell-syntax-highlighting))
+
+(use-package eshell-git-prompt :ensure :after eshell)
+#+end_src
+** Repeat
+#+begin_src emacs-lisp
+(use-package repeat :ensure nil
+  :init
+  (repeat-mode 1)
+
+  :custom
+  (repeat-exit-timeout 5))
+
+(defvar isearch-repeat-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "s") #'isearch-repeat-forward)
+    (define-key map (kbd "r") #'isearch-repeat-backward)
+    map))
+
+(dolist (cmd '(isearch-repeat-forward isearch-repeat-backward))
+  (put cmd 'repeat-map 'isearch-repeat-map))
+
+;; (defvar org-heading-repeat-map
+  ;; (let ((map (make-sparse-keymap)))
+    ;; (define-key map (kbd "n") #'org-next-visible-heading)
+    ;; (define-key map (kbd "p") #'org-previous-visible-heading)
+    ;; map))
+
+;; (dolist (cmd '(org-next-visible-heading org-previous-visible-heading))
+  ;; (put cmd org-mode-map 'org-heading-repeat-map))
+#+end_src
+** Mwheel
+#+begin_src emacs-lisp
+(use-package mwheel
+  :ensure nil
+  :custom
+  (mouse-wheel-tilt-scroll t)
+  (mouse-wheel-scroll-amount-horizontal 2)
+  (mouse-wheel-flip-direction t))
+#+end_src
+** Dictionary
+#+begin_src emacs-lisp
+(use-package dictionary :defer t
+  :custom
+  (dictionary-server "dict.org"))
+#+end_src
+** Pulse
+#+begin_src emacs-lisp
+(use-package pulse :ensure nil :defer t
+  :init
+  (defun pulse-line (&rest _)
+    "Pulse the current line."
+    (pulse-momentary-highlight-one-line (point)))
+
+  (dolist (command '(scroll-up-command
+             scroll-down-command
+             windmove-left
+             windmove-right
+             windmove-up
+             windmove-down
+             move-to-window-line-top-bottom
+             recenter-top-bottom other-window))
+    (advice-add command :after #'pulse-line)))
+#+end_src
+** Dumb Jump
+#+begin_src emacs-lisp
+(use-package dumb-jump :ensure
+  :if (not (getenv "TERMUX_VERSION"))
+
+  :custom
+  (dumb-jump-prefer-searcher 'ag)
+  (dumb-jump-force-searcher 'ag)
+  (dumb-jump-selector 'completing-read)
 
   :init
-  (defun my/vterm-box (&optional box) (interactive)
-         (let ((vterm-environment
-                (list (concat "VTERM_CI=" (if box box "box"))))) (vterm))))
+  (add-hook 'xref-backend-functions #'dumb-jump-xref-activate)
 
-(use-package multi-vterm :ensure
-  :bind
-  ("C-s-n" . multi-vterm)
-  ("C-s-." . multi-vterm-next)
-  ("C-s-," . multi-vterm-prev)
-  ("s--"   . multi-vterm-dedicated-toggle)
-  ("C-s--" . multi-vterm-project))
+  :ensure-system-package
+  ((ag . "brew install the_silver_searcher"))
+  )
 #+end_src
-* Languages
-** C
+** Scroll
+#+begin_src emacs-lisp
+(use-package pixel-scroll
+  :init
+  (pixel-scroll-precision-mode 1))
+#+end_src
+** Isearch
+#+begin_src emacs-lisp
+(use-package isearch
+  :custom (isearch-allow-motion t))
+#+end_src
+** Conf-mode
+#+begin_src emacs-lisp
+(defun my-detect-conf-mode ()
+  "Detect and use conf-mode based on file contents."
+  (when (and (not (derived-mode-p 'conf-mode))
+         (save-excursion
+           (goto-char (point-min))
+           (re-search-forward "^\\s-*config\\s-+" nil t)
+           (re-search-forward "^\\s-*option\\s-+" nil t)))
+    (conf-mode)))
+
+(add-hook 'find-file-hook 'my-detect-conf-mode)
+#+end_src
+** Buku
+#+begin_src emacs-lisp
+(use-package ebuku :ensure)
+#+end_src
+** kkp.el
+#+begin_src emacs-lisp
+(use-package kkp :ensure
+  ;; :if (not window-system)
+  :config
+  ;; (setq kkp-alt-modifier 'alt) ;; use this if you want to map the Alt keyboard modifier to Alt in Emacs (and not to Meta)
+  (global-kkp-mode +1))
+#+end_src
+** Nginx
+#+begin_src emacs-lisp
+(use-package nginx-mode
+  :ensure
+  :defer
+  :init
+  (add-to-list 'magic-mode-alist '("\\(\\(?:^# nginx\\|^server\\|^http\\|^upstream\\)\\)" . nginx-mode))
+  (add-to-list 'auto-mode-alist '("/nginx/sites-\\(?:available\\|enabled\\)/" . nginx-mode)))
+#+end_src
+** COMMENT Golden ratio
+:LOGBOOK:
+- Refiled on [2025-10-15 Wed 10:18]
+- Refiled on [2024-11-05 tis 11:27]
+:END:
+#+begin_src emacs-lisp
+(use-package golden-ratio :ensure :defer t
+  :init (golden-ratio-mode 1))
+#+end_src
+** Devil mode
+#+begin_src emacs-lisp
+(use-package devil :ensure)
+#+end_src
+** Gptel
+#+begin_src emacs-lisp
+
+(use-package gptel :ensure
+  :init
+  ;; (gptel-make-ollama "Ollama"
+  ;;   :host "localhost:11434"
+  ;;   :stream t
+  ;;   :models '(qwen3-coder-next:cloud))
+
+  (setq
+   gptel-model 'glm-4.7:cloud
+   gptel-backend (gptel-make-ollama "Ollama"
+                   :host "localhost:11434"
+                   :stream t
+                   :models '(glm-4.7-flash:latest)))
+  )
+#+end_src
+** cutup.el
+#+begin_src emacs-lisp
+(use-package cutup
+  :load-path "~/.emacs.d/lisp/cutup")
+#+end_src
+* 💬 Languages
+** 🌊 C
 #+begin_src emacs-lisp
 (use-package c-or-c++-mode :defer t
   :mode ("\\.c\\'" "\\.h\\'" "\\.ts\\'")
   :custom
   ;; (c-ts-common-indent-offset 4)
   (c-doc-comment-style '((c-mode . doxygen)
-                         (c-ts-mode . doxygen)))
+             (c-ts-mode . doxygen)))
   (c-basic-offset 4)
 
   :hook
@@ -704,24 +1970,6 @@
   (c-mode . which-function-mode)
   (c-mode . (lambda () (indent-tabs-mode 0)))
   (c-mode . (lambda () (c-set-style "awk"))))
-
-;; (add-to-list 'treesit-auto-recipe-list
-             ;; (make-treesit-auto-recipe
-              ;; :lang 'c :ts-mode 'c-ts-mode :remap '(c-mode)
-              ;; :url "https://github.com/tree-sitter/tree-sitter-c"))
-
-;; (add-to-list 'treesit-auto-recipe-list
-;;              (make-treesit-auto-recipe
-;;               :lang 'cpp :ts-mode 'c++-ts-mode :remap '(c++-mode)
-;;               :url "https://github.com/tree-sitter/tree-sitter-cpp"))
-
-;; (add-to-list 'treesit-auto-recipe-list
-             ;; (make-treesit-auto-recipe
-              ;; :lang 'c++ :ts-mode 'c++-ts-mode :remap '(c++-mode)
-              ;; :url "https://github.com/tree-sitter/tree-sitter-cpp"))
-;; (use-package c-mode
-;;	:mode ("\\.c\\'" "\\.h\\'")
-;;	:hook (c-mode . auto-fill-mode))
 #+end_src
 ** Markdown
 #+begin_src emacs-lisp
@@ -731,10 +1979,10 @@
   (markdown-mode . flyspell-mode)
   :mode "\\.md\\'"
   :bind (:map markdown-mode-map
-              ("<M-up>" . markdown-move-up)
-              ("<M-down>" . markdown-move-down)
-              ("<M-left>" . markdown-promote)
-              ("<M-right>" . markdown-demote)))
+          ("<M-up>" . markdown-move-up)
+          ("<M-down>" . markdown-move-down)
+          ("<M-left>" . markdown-promote)
+          ("<M-right>" . markdown-demote)))
 #+end_src
 ** Doxygen
 #+begin_src emacs-lisp
@@ -742,29 +1990,22 @@
   :hook
   ((c-ts-mode) . highlight-doxygen-mode))
 #+end_src
-** COMMENT Python
+** 🐍 Python
 #+begin_src emacs-lisp
 (use-package python-mode :defer t
   :mode "\\.py\\'"
+  :ensure-system-package
+  ((pylsp . "brew install python-lsp-server"))
   ;; (python-mode . (lambda() (if (file-remote-p default-directory) nil (eglot-ensure))))
-  ;; :init
-  ;; (add-to-list 'treesit-auto-recipe-list
-  ;;              (make-treesit-auto-recipe
-  ;;               :lang 'python :ts-mode 'python-ts-mode :remap '(python-mode)
-  ;;               :url "https://github.com/tree-sitter/tree-sitter-python"))
   )
 
-(use-package python-black :ensure
+(use-package python-black :ensure :after python-mode
   :hook (python-mode . python-black-on-save-mode)
   :ensure-system-package ((black . "fish -c 'i -y black'")))
 
-(use-package auto-virtualenv :ensure)
-
-(use-package pyvenv :ensure
-  :config
-  (add-hook 'python-mode-hook 'auto-virtualenv-set-virtualenv)
-  (add-hook 'projectile-after-switch-project-hook 'auto-virtualenv-set-virtualenv)  ;; If using projectile
-  )
+(use-package auto-virtualenv :ensure :after python-mode
+  :init (use-package pyvenv :ensure)
+  :config (add-hook 'python-mode-hook 'auto-virtualenv-set-virtualenv))
 
 ;; (use-package pipenv :ensure
 ;;   :hook
@@ -795,27 +2036,22 @@
       ;; #'pipenv-projectile-after-switch-extended)
       (setq pipenv-with-projectile nil))))
 #+end_src
-** Java
+** 🍵 Java
 #+begin_src emacs-lisp
 (use-package java-ts-mode :defer t
-  :mode "\\.java\\'"
-
-  :init
-  (make-treesit-auto-recipe
-   :lang 'java :ts-mode 'java-ts-mode :remap '(java-mode)
-   :url "https://github.com/tree-sitter/tree-sitter-java"))
+  :mode "\\.java\\'")
 #+end_src
 ** Haskell
 #+begin_src emacs-lisp
 (use-package haskell-mode :ensure :defer t
   :hook ((haskell-mode . auto-fill-mode))
   :bind (:map haskell-mode-map
-              ("C-c C-i" . haskell-process-load-file)
-              ("C-c C-r" . haskell-process-reload)))
+          ("C-c C-i" . haskell-process-load-file)
+          ("C-c C-r" . haskell-process-reload)))
 #+end_src
 ** COMMENT Futhark
 #+begin_src emacs-lisp
-(use-package futhark-mode :ensure
+(use-package futhark-mode :ensure :defer t
   :mode "\\.fut\\'")
 #+end_src
 ** Latex
@@ -827,15 +2063,15 @@
 (use-package emacs-lisp-mode :defer t
   :hook (emacs-list-mode . auto-fill-mode))
 #+end_src
-** Web
+** 🌐 Web
 #+begin_src emacs-lisp
 (use-package web-mode :ensure :defer t
   :hook ((php-mode . auto-fill-mode))
   :mode ("\\.blade.php\\'"
-         "\\.php\\'"
-         "\\.html\\'"
-         "\\.vue\\'"
-         "\\.asp\\'")
+     "\\.php\\'"
+     "\\.html\\'"
+     "\\.vue\\'"
+     "\\.asp\\'")
   :interpreter "web")
 
 (use-package restclient :ensure :defer t)
@@ -844,7 +2080,7 @@
 #+begin_src emacs-lisp
 (use-package php-mode :ensure
   :hook ((php-mode . auto-fill-mode)
-         (php-mode . flymake-mode))
+     (php-mode . flymake-mode))
   ;; :mode "\\.php\\'"
   :init
   (use-package phpunit :ensure)
@@ -855,7 +2091,7 @@
 (use-package sass-mode :ensure
   :mode ("\\.scss\\'" "\\.sass\\'"))
 #+end_src
-** Rust
+** 🦀 Rust
 #+begin_src emacs-lisp
 (use-package rustic :defer t
   :ensure
@@ -869,22 +2105,13 @@
   (setq rustic-format-on-save t)
   (add-hook 'rustic-mode-hook 'rk/rustic-mode-hook))
 #+end_src
-** Go
+** 🦫 Go
 #+begin_src emacs-lisp
-(use-package go-ts-mode :ensure
-  :hook ((go-ts-mode . auto-fill-mode)
-         (go-ts-mode . flymake-mode))
+(use-package go-mode :ensure :defer t
+  :hook ((go-mode . auto-fill-mode)
+     (go-mode . flymake-mode))
 
-  :mode "\\.go\\'"
-
-  :init
-  (add-to-list 'treesit-auto-recipe-list
-               (make-treesit-auto-recipe
-                :lang 'go
-                :ts-mode 'go-ts-mode
-                :remap '(go-mode)
-                :url "https://github.com/tree-sitter/tree-sitter-go"
-                :ext "\\.go\\'")))
+  :mode "\\.go\\'")
 #+end_src
 ** Yaml
 #+begin_src emacs-lisp
@@ -898,22 +2125,13 @@
 #+end_src
 ** Docker
 #+begin_src emacs-lisp
-(use-package dockerfile-mode :defer t
-  :mode "Dockerfile\\'")
+(use-package dockerfile-mode :ensure :defer t
+  :mode ("Dockerfile\\'" "Containerfile\\'"))
 #+end_src
 ** Julia
 #+begin_src emacs-lisp
-(use-package julia-ts-mode :ensure :defer t
-  :mode "\\.jl\\'"
-
-  :init
-  (add-to-list 'treesit-auto-recipe-list
-               (make-treesit-auto-recipe
-                :lang 'julia
-                :ts-mode 'julia-ts-mode
-                :remap '(julia-mode)
-                :url "https://github.com/tree-sitter/tree-sitter-julia"
-                :ext "\\.jl\\'")))
+(use-package julia-mode :ensure :defer t
+  :mode "\\.jl\\'")
 #+end_src
 ** Nix
 #+begin_src emacs-lisp
@@ -924,39 +2142,36 @@
 #+begin_src emacs-lisp
 (use-package ssh-config-mode :ensure :defer t)
 #+end_src
-** Fish
+** 🐟 Fish
 #+begin_src emacs-lisp
 (use-package fish-mode :ensure :defer t
   :mode "\\.fish\\'")
 #+end_src
-** JSON
+** COMMENT JSON
 #+begin_src emacs-lisp
 (use-package json-ts-mode :defer t
   :mode "\\.json\\'"
   :custom (json-ts-mode-indent-offset 2))
-
-(add-to-list 'treesit-auto-recipe-list
-             (make-treesit-auto-recipe
-              :lang 'json
-              :ts-mode 'json-ts-mode
-              :remap '(json-mode)
-              :url "https://github.com/tree-sitter/tree-sitter-json"
-              :ext "\\.json\\'"))
 #+end_src
 ** Systemd
 #+begin_src emacs-lisp
 (use-package systemd :ensure :defer t
-  :mode ("\\.service\\'" . systemd-mode))
+  :mode (("\\.service\\'" . systemd-mode)
+     ("\\.container\\'" . systemd-mode)
+     ("\\.pod\\'" . systemd-mode)
+     ("\\.volume\\'" . systemd-mode)
+     ("\\.build\\'" . systemd-mode)
+     ))
 #+end_src
 ** COMMENT VHDL
 #+begin_src emacs-lisp
-(use-package vhdl-tools :ensure
+(use-package vhdl-tools :ensure :defer t
   :mode (("\\.vhdl\\'" . vhdl-mode)
-         ("\\.vhd\\'"  . vhdl-mode)))
+     ("\\.vhd\\'"  . vhdl-mode)))
 #+end_src
 ** COMMENT BNF
 #+begin_src emacs-lisp
-(use-package bnfc :ensure
+(use-package bnfc :ensure :defer t
   :mode "\\.cf\\'")
 #+end_src
 ** Protobuf
@@ -965,68 +2180,222 @@
   :mode "\\.proto\\'"
 
   :custom
-  (protobuf-ts-mode-indent-offset 4)
-
-  :init
-  (add-to-list 'treesit-language-source-alist
-               '(proto "https://github.com/mitchellh/tree-sitter-proto")))
+  (protobuf-ts-mode-indent-offset 4))
 #+end_src
-** Bash
+** 🔨 Bash
 #+begin_src emacs-lisp
-(use-package bash-ts-mode :defer t
+(use-package bash-mode :defer t
   :mode ("\\.sh\\'" "\\.bash\\'"))
-
-(add-to-list 'treesit-auto-recipe-list
-             (make-treesit-auto-recipe
-              :lang 'bash
-              :ts-mode 'bash-ts-mode
-              :remap '(sh-mode)
-              :url "https://github.com/tree-sitter/tree-sitter-bash"
-              :ext "\\.sh\\'"))
 #+end_src
 ** Arduino
 #+begin_src emacs-lisp
-(use-package arduino-mode :ensure
+(use-package arduino-mode :ensure :defer t
   :mode "\\.ino\\'")
 #+end_src
 ** Lua
 #+begin_src emacs-lisp
-(use-package lua-mode :ensure
+(use-package lua-mode :ensure :defer t
   :mode "\\.lua\\'")
 #+end_src
-** Robot
+** 🤖 Robot
 #+begin_src emacs-lisp
-(use-package robot-mode :ensure
+(use-package robot-mode :ensure :defer t
   :mode "\\.robot\\'")
 #+end_src
-* Flymake
+** Dart
 #+begin_src emacs-lisp
-(use-package flymake :defer t
-  :bind
-  ("C-c e n" . flymake-goto-next-error)
-  ("C-c e p" . flymake-goto-prev-error))
+(use-package dart-mode :ensure :defer
+  :mode "\\.dart\\'")
 #+end_src
-* Expand region
+** GDB
 #+begin_src emacs-lisp
-(use-package expand-region :ensure :defer t
-  :bind ("M-o" . er/expand-region))
+(use-package gdb-script-mode :defer
+  :mode "\\.gdb\\'")
 #+end_src
-* Multiple Cursor
+** Powershell
 #+begin_src emacs-lisp
-(use-package multiple-cursors :ensure :defer t
-  :bind
-  ("C-S-c C-S-c" . mc/edit-lines)
-  ("C-\>" . mc/mark-next-like-this)
-  ("C-\<" . mc/mark-previous-like-this)
+(use-package powershell :defer :ensure
+  :mode ("\\.ps1\\'" . powershell-mode))
+#+end_src
+* Startup
+#+begin_src emacs-lisp
+;; Start org-agenda after org-roam has finished loading
+;; (unless noninteractive
+;;   (use-package emacs
+;;     ;; :if window-system
+;;     :after org-roam :config (org-agenda nil "a")))
+
+(use-package emacs
+  ;; :if window-system
+  :after org-roam :config (org-agenda nil "a"))
+
+(defun my/emacsclient-default-buffer ()
+  "Show my preferred buffer in new emacsclient frames."
+  (when (member (buffer-name) '("*scratch*" "*GNU Emacs*"))
+    (switch-to-buffer "*Org Agenda*")))
+
+(add-hook 'server-after-make-frame-hook #'my/emacsclient-default-buffer)
+#+end_src
+* COMMENT Archive
+** Ivy
+#+begin_src emacs-lisp
+(use-package ivy :ensure
+  :bind (:map ivy-minibuffer-map ("C-l" . ivy-backward-kill-word))
+  :init (ivy-mode 1))
+#+end_src
+** LSP Mode
+:LOGBOOK:
+- Refiled on [2023-09-09 lör 15:08]
+:END:
+#+begin_src emacs-lisp
+(use-package lsp-mode :ensure
+  :commands lsp
+  :custom
+  (lsp-eldoc-render-all t)
+  (lsp-idle-delay 0.6)
+  ;; enable / disable the hints as you prefer:
+  (lsp-auto-guess-root t)
+  ;; (lsp-enable-symbol-highlighting nil)
+  ;; (lsp-headerline-breadcrumb-enable nil)
+  ;; (lsp-semantic-tokens-enable nil)
+  ;; (lsp-enable-folding nil)
+  ;; (lsp-enable-imenu nil)
+  ;; (lsp-rust-analyzer-cargo-watch-command "clippy")
+  ;; (lsp-rust-analyzer-server-display-inlay-hints t)
+  ;; (lsp-rust-analyzer-display-lifetime-elision-hints-enable "skip_trivial")
+  ;; (lsp-rust-analyzer-display-chaining-hints t)
+  ;; (lsp-rust-analyzer-display-lifetime-elision-hints-use-parameter-names nil)
+  ;; (lsp-rust-analyzer-display-closure-return-type-hints t)
+  ;; (lsp-rust-analyzer-display-parameter-hints nil)
+  ;; (lsp-rust-analyzer-display-reborrow-hints nil)
+  :config
+  (add-hook 'lsp-mode-hook 'lsp-ui-mode)
   :init
-  (global-set-key (kbd "C-c C-<") 'mc/mark-all-like-this))
+  (use-package ccls :ensure
+    :hook ((c-mode c++-mode) .
+       (lambda () (require 'ccls) (lsp)))
+    :custom
+    (ccls-executable "~/.local/bin/ccls")))
+
+(use-package lsp-ui
+  :ensure
+  :commands lsp-ui-mode
+  :custom
+                    ; (lsp-ui-peek-always-show t)
+                    ; (lsp-ui-sideline-show-hover t)
+                    ; (lsp-ui-doc-enable nil)
+  )
 #+end_src
-* Nov
+** Direnv
+:LOGBOOK:
+- Refiled on [2023-10-03 tis 21:28]
+:END:
 #+begin_src emacs-lisp
-(use-package nov :ensure :defer t
-  :init (add-to-list 'auto-mode-alist '("\\.epub\\'" . nov-mode)))
+(use-package direnv :ensure
+  :config
+  (direnv-mode))
 #+end_src
-* Writeroom
+** Evil
+:LOGBOOK:
+- Refiled on [2024-02-03 lör 17:52]
+:END:
+#+begin_src emacs-lisp
+(use-package evil :ensure)
+#+end_src
+** ChatGPT
+:LOGBOOK:
+- Refiled on [2024-02-04 sön 16:05]
+- Refiled on [2024-02-03 lör 13:19]
+:END:
+#+begin_src emacs-lisp
+(use-package chatgpt-shell :ensure
+  :custom (chatgpt-shell-openai-key
+       (auth-source-pick-first-password :host "api.openai.com"))
+  (chatgpt-shell-model-versions '("gpt-3.5-turbo")))
+#+end_src
+** Helpful
+:LOGBOOK:
+- Refiled on [2024-02-04 sön 17:37]
+:END:
+#+begin_src emacs-lisp
+(use-package helpful :ensure :defer t
+  :bind (("C-h f" . helpful-callable)
+     ("C-h v" . helpful-variable)
+     ("C-h k" . helpful-key)))
+#+end_src
+** Highlight TODO
+:LOGBOOK:
+- Refiled on [2024-05-27 mån 16:15]
+:END:
+#+begin_src emacs-lisp
+(use-package hl-todo :ensure :defer t
+  :hook (c-mode . hl-todo-mode))
+#+end_src
+** Rainbow mode
+:LOGBOOK:
+- Refiled on [2024-09-09 mån 14:00]
+:END:
+#+begin_src emacs-lisp
+(use-package rainbow-mode :ensure :defer t
+  :hook (emacs-lisp-mode . rainbow-mode))
+#+end_src
+** ws-butler
+:LOGBOOK:
+- Refiled on [2024-09-24 tis 16:41]
+:END:
+#+begin_src emacs-lisp
+(use-package ws-butler :ensure :init (ws-butler-global-mode))
+#+end_src
+** Executable
+:LOGBOOK:
+- Refiled on [2024-11-05 tis 11:28]
+:END:
+#+begin_src emacs-lisp
+(use-package executable
+  :hook (after-save . executable-make-buffer-file-executable-if-script-p))
+#+end_src
+** COMMENT VTerm
+:LOGBOOK:
+- Refiled on [2024-11-05 tis 11:28]
+:END:
+#+begin_src emacs-lisp
+(use-package vterm :ensure :defer t
+  :if (and (not (getenv "TERMUX_VERSION")) (executable-find "cmake"))
+
+  :bind
+  ("C-z b" . (lambda () (interactive) (my/vterm-box "box")))
+  ("C-z d" . (lambda () (interactive) (my/vterm-box "debian")))
+
+  :ensure-system-package
+  ((cmake . "fish -c 'i -y cmake'")
+   (libtoolize . "fish -c 'i -y libtool'"))
+
+  :init
+  (defun my/vterm-box (&optional box) (interactive)
+     (let ((vterm-environment
+        (list (concat "VTERM_CI=" (if box box "box"))))) (vterm))))
+
+(use-package multi-vterm :ensure :defer t
+  :bind
+  ("C-s-n" . multi-vterm)
+  ("C-s-." . multi-vterm-next)
+  ("C-s-," . multi-vterm-prev)
+  ("s--"   . multi-vterm-dedicated-toggle)
+  ("C-s--" . multi-vterm-project))
+
+(use-package eshell-vterm :ensure :after eshell
+  :bind (:map vterm-mode-map
+     ("C-q" . vterm-send-next-key))
+  :config
+  (eshell-vterm-mode)
+  :init
+  (defalias 'eshell/v 'eshell-exec-visual))
+
+#+end_src
+** COMMENT Writeroom
+:LOGBOOK:
+- Refiled on [2025-10-15 Wed 15:13]
+:END:
 #+begin_src emacs-lisp
 (use-package writeroom-mode :ensure
   :custom
@@ -1057,6 +2426,8 @@
      julia-mode
      julia-ts-mode
      lisp-data-mode
+     lua-mode
+     lua-ts-mode
      magit-mode
      makefile-gmake-mode
      makefile-mode
@@ -1071,6 +2442,7 @@
      protobuf-ts-mode
      python-mode
      python-ts-mode
+     powershell-mode
      robot-mode
      rust-ts-mode
      sgml-mode
@@ -1080,6 +2452,7 @@
      vterm-mode
      yaml-mode
      ld-script-mode
+     web-mode
      ))
   (writeroom-global-effects nil)
   (writeroom-mode-line t)
@@ -1087,297 +2460,4 @@
   (global-writeroom-mode t nil (writeroom-mode))
   (writeroom-width 81)
   (writeroom-maximize-window nil))
-#+end_src
-* Spacious Padding
-#+begin_src emacs-lisp
-(use-package spacious-padding :ensure
-  :config
-  (spacious-padding-mode t)
-  :custom
-  (spacious-padding-widths
-   '(:internal-border-width 16 :right-divider-width 32 :scroll-bar-width 8)))
-#+end_src
-* Dired
-#+begin_src emacs-lisp
-(use-package dired
-  :hook (dired-mode . dired-hide-details-mode)
-
-  :custom
-  (dired-mouse-drag-files t)
-  (dired-dwim-target t)
-  (dired-auto-revert-buffer t)
-  (delete-by-moving-to-trash t)
-  ;; (setq ls-lisp-use-insert-directory-program nil)
-  )
-
-(use-package dired-subtree :ensure :after dired
-  :bind (:map dired-mode-map
-              ("<tab>" . dired-subtree-toggle)
-              ("<C-tab>" . dired-subtree-cycle)))
-
-(use-package nerd-icons-dired :ensure :after dired
-  :hook (dired-mode . nerd-icons-dired-mode))
-
-(use-package dired-hide-dotfiles :ensure :after dired
-  :hook (dired-mode . dired-hide-dotfiles-mode)
-  :bind (:map dired-mode-map ("C-." . dired-hide-dotfiles-mode)))
-
-(use-package dired-collapse :ensure :after dired
-  :hook (dired-mode . dired-collapse-mode))
-#+end_src
-
-** COMMENT Dirvish
-#+begin_src emacs-lisp
-(use-package dirvish :ensure
-  :init
-  (dirvish-override-dired-mode)
-  :config
-  (setq dirvish-mode-line-format
-        '(:left (sort symlink) :right (omit yank index)))
-  (setq dirvish-mode-line-height 10)
-  (setq dirvish-attributes
-        '(nerd-icons file-time file-size collapse subtree-state vc-state git-msg))
-  (setq dirvish-subtree-state-style 'nerd)
-  (setq delete-by-moving-to-trash t)
-  (setq dirvish-path-separators (list
-                                 (format "  %s " (nerd-icons-codicon "nf-cod-home"))
-                                 (format "  %s " (nerd-icons-codicon "nf-cod-root_folder"))
-                                 (format " %s " (nerd-icons-faicon "nf-fa-angle_right"))))
-  (setq dired-listing-switches
-        "-l --almost-all --human-readable --group-directories-first --no-group")
-  (dirvish-peek-mode) ; Preview files in minibuffer
-  (dirvish-side-follow-mode) ; similar to `treemacs-follow-mode'
-)
-#+end_src
-* COMMENT Golden ratio
-#+begin_src emacs-lisp
-(use-package golden-ratio :ensure :defer t
-  :init (golden-ratio-mode 1))
-#+end_src
-* Eshell
-#+begin_src emacs-lisp
-(use-package eshell :ensure nil :defer t)
-
-(use-package eshell-syntax-highlighting :ensure :after eshell
-  :config
-  (eshell-syntax-highlighting-global-mode +1)
-  :init
-  (defface eshell-syntax-highlighting-invalid-face
-    '((t :inherit diff-error))
-    "Face used for invalid Eshell commands."
-    :group 'eshell-syntax-highlighting))
-
-(use-package eshell-git-prompt :ensure :after eshell)
-
-(use-package eshell-vterm :ensure :after eshell
-  :bind (:map vterm-mode-map
-         ("C-q" . vterm-send-next-key))
-  :config
-  (eshell-vterm-mode)
-  :init
-  (defalias 'eshell/v 'eshell-exec-visual))
-#+end_src
-* Repeat
-#+begin_src emacs-lisp
-(use-package repeat :ensure nil
-  :init
-  (repeat-mode 1)
-
-  :custom
-  (repeat-exit-timeout 5))
-#+end_src
-* Mwheel
-#+begin_src emacs-lisp
-(use-package mwheel
-  :ensure nil
-  :custom
-  (mouse-wheel-tilt-scroll t)
-  (mouse-wheel-scroll-amount-horizontal 2)
-  (mouse-wheel-flip-direction t))
-#+end_src
-* Dictionary
-#+begin_src emacs-lisp
-(use-package dictionary :defer t
-  :custom
-  (dictionary-server "dict.org"))
-#+end_src
-* Executable
-#+begin_src emacs-lisp
-(use-package executable
-  :hook (after-save . executable-make-buffer-file-executable-if-script-p))
-#+end_src
-* Pulse
-#+begin_src emacs-lisp
-(use-package pulse
-  :ensure nil
-  :defer t
-  :init
-  (defun pulse-line (&rest _)
-    "Pulse the current line."
-    (pulse-momentary-highlight-one-line (point)))
-
-  (dolist (command '(scroll-up-command
-                     scroll-down-command
-                     windmove-left
-                     windmove-right
-                     windmove-up
-                     windmove-down
-                     move-to-window-line-top-bottom
-                     recenter-top-bottom other-window))
-    (advice-add command :after #'pulse-line)))
-#+end_src
-* Dumb Jump
-#+begin_src emacs-lisp
-(use-package dumb-jump :ensure
-  :if (not (getenv "TERMUX_VERSION"))
-
-  :custom
-  (dumb-jump-prefer-searcher 'ag)
-  (dumb-jump-force-searcher 'ag)
-  (dumb-jump-selector 'completing-read)
-
-  :init
-  (add-hook 'xref-backend-functions #'dumb-jump-xref-activate)
-
-  :ensure-system-package
-  ((ag . "fish -c 'i -y the_silver_searcher'"))
-  )
-#+end_src
-* Scroll
-#+begin_src emacs-lisp
-(use-package pixel-scroll
-  :if (not (string-match-p (regexp-quote "doshkad") system-name))
-  ;; :bind
-  ;; ([remap scroll-up-command]   . pixel-scroll-interpolate-down)
-  ;; ([remap scroll-down-command] . pixel-scroll-interpolate-up)
-  :custom
-  (pixel-scroll-precision-interpolate-page t)
-  :init
-  (pixel-scroll-precision-mode 1))
-#+end_src
-* Startup
-#+begin_src emacs-lisp
-(org-agenda nil "a")
-#+end_src
-* Isearch
-#+begin_src emacs-lisp
-(use-package isearch
-  :custom (isearch-allow-motion t))
-#+end_src
-* COMMENT Archive
-** Ivy
-#+begin_src emacs-lisp
-(use-package ivy :ensure
-  :bind (:map ivy-minibuffer-map ("C-l" . ivy-backward-kill-word))
-  :init (ivy-mode 1))
-#+end_src
-** LSP Mode
-:LOGBOOK:
-- Refiled on [2023-09-09 lör 15:08]
-:END:
-#+begin_src emacs-lisp
-(use-package lsp-mode
-  :ensure t
-  :commands lsp
-  :custom
-  (lsp-eldoc-render-all t)
-  (lsp-idle-delay 0.6)
-  ;; enable / disable the hints as you prefer:
-  (lsp-auto-guess-root t)
-  ;; (lsp-enable-symbol-highlighting nil)
-  ;; (lsp-headerline-breadcrumb-enable nil)
-  ;; (lsp-semantic-tokens-enable nil)
-  ;; (lsp-enable-folding nil)
-  ;; (lsp-enable-imenu nil)
-  ;; (lsp-rust-analyzer-cargo-watch-command "clippy")
-  ;; (lsp-rust-analyzer-server-display-inlay-hints t)
-  ;; (lsp-rust-analyzer-display-lifetime-elision-hints-enable "skip_trivial")
-  ;; (lsp-rust-analyzer-display-chaining-hints t)
-  ;; (lsp-rust-analyzer-display-lifetime-elision-hints-use-parameter-names nil)
-  ;; (lsp-rust-analyzer-display-closure-return-type-hints t)
-  ;; (lsp-rust-analyzer-display-parameter-hints nil)
-  ;; (lsp-rust-analyzer-display-reborrow-hints nil)
-  :config
-  (add-hook 'lsp-mode-hook 'lsp-ui-mode)
-  :init
-  (use-package ccls :ensure
-    :hook ((c-mode c++-mode) .
-           (lambda () (require 'ccls) (lsp)))
-    :custom
-    (ccls-executable "~/.local/bin/ccls")))
-
-(use-package lsp-ui
-  :ensure
-  :commands lsp-ui-mode
-  :custom
-                                        ; (lsp-ui-peek-always-show t)
-                                        ; (lsp-ui-sideline-show-hover t)
-                                        ; (lsp-ui-doc-enable nil)
-  )
-#+end_src
-** Direnv
-:LOGBOOK:
-- Refiled on [2023-10-03 tis 21:28]
-:END:
-#+begin_src emacs-lisp
-(use-package direnv :ensure
-  :config
-  (direnv-mode))
-#+end_src
-** Helm
-:LOGBOOK:
-- Refiled on [2024-02-03 lör 11:53]
-- Refiled on [2023-09-29 Fri 16:43]
-- Refiled on [2023-09-12 tis 19:31]
-- Refiled on [2023-09-12 tis 19:27]
-:END:
-#+begin_src emacs-lisp
-(use-package helm :ensure
-  :bind
-  ("C-x m" . helm-man-woman)
-  ("C-x t" . helm-top))
-#+end_src
-** Evil
-:LOGBOOK:
-- Refiled on [2024-02-03 lör 17:52]
-:END:
-#+begin_src emacs-lisp
-(use-package evil :ensure)
-#+end_src
-** ChatGPT
-:LOGBOOK:
-- Refiled on [2024-02-04 sön 16:05]
-- Refiled on [2024-02-03 lör 13:19]
-:END:
-#+begin_src emacs-lisp
-(use-package chatgpt-shell :ensure
-  :custom (chatgpt-shell-openai-key
-           (auth-source-pick-first-password :host "api.openai.com"))
-  (chatgpt-shell-model-versions '("gpt-3.5-turbo")))
-#+end_src
-** Helpful
-:LOGBOOK:
-- Refiled on [2024-02-04 sön 17:37]
-:END:
-#+begin_src emacs-lisp
-(use-package helpful :ensure :defer t
-  :bind (("C-h f" . helpful-callable)
-         ("C-h v" . helpful-variable)
-         ("C-h k" . helpful-key)))
-#+end_src
-** Highlight TODO
-:LOGBOOK:
-- Refiled on [2024-05-27 mån 16:15]
-:END:
-#+begin_src emacs-lisp
-(use-package hl-todo :ensure :defer t
-  :hook (c-ts-mode . hl-todo-mode))
-#+end_src
-** Rainbow mode
-:LOGBOOK:
-- Refiled on [2024-09-09 mån 14:00]
-:END:
-#+begin_src emacs-lisp
-(use-package rainbow-mode :ensure :defer t
-  :hook (emacs-lisp-mode . rainbow-mode))
 #+end_src
