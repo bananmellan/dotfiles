@@ -1933,6 +1933,16 @@ körverk syns som meddelande i ekorutan."
 #+end_src
 ** Gptel
 #+begin_src emacs-lisp
+(require 'subr-x)
+
+(defun my/mistral-api-key ()
+  "Return the Mistral API key from systemd-creds, or nil if unavailable."
+  (when (executable-find "systemd-creds")
+    (let ((key (string-trim
+                (shell-command-to-string
+                 "systemd-creds --user decrypt ~/.secrets/mistral"))))
+      (unless (string-empty-p key) key))))
+
 (use-package gptel :ensure
   :config
   ;; (gptel-make-ollama "Ollama"
@@ -1952,9 +1962,7 @@ körverk syns som meddelande i ekorutan."
                         :host "api.mistral.ai"
                         :endpoint "/v1/chat/completions"
                         :protocol "https"
-                        :key (lambda ()
-                               (auth-source-pick-first-password
-                                :host "api.mistral.ai"))
+                        :key #'my/mistral-api-key
                         :models '("mistral-small-latest"
                                   "mistral-medium-latest"
                                   "mistral-large-latest"))))
