@@ -1,5 +1,11 @@
 if status --is-interactive
-    # Day-to-day CLI stuff
+    # ==========================================================================
+    # Interactive shell configuration
+    # ==========================================================================
+
+    # --------------------------------------------------------------------------
+    # Command aliases for enhanced productivity
+    # --------------------------------------------------------------------------
     alias pgrep="pgrep -a"
     alias pkill="pkill -e"
     # alias mv="mv -v"
@@ -7,49 +13,94 @@ if status --is-interactive
     # alias rm="rm -v"
     alias mkdir="mkdir -v"
     alias rmdir="rmdir -v"
+
+    # --------------------------------------------------------------------------
+    # Directory operations
+    # --------------------------------------------------------------------------
     abbr cdtemp "cd (mktemp -d)"
+
+    # --------------------------------------------------------------------------
+    # Network utilities
+    # --------------------------------------------------------------------------
     alias getip="wget -qO- icanhazip.com 2>/dev/null"
+
+    # --------------------------------------------------------------------------
+    # File management
+    # --------------------------------------------------------------------------
     alias trash="gio trash"
+
+    # --------------------------------------------------------------------------
+    # Container runtime selection
+    # --------------------------------------------------------------------------
     if not exists docker and exists podman
         alias docker="podman"
     end
+
+    # --------------------------------------------------------------------------
+    # Terminal multiplexer
+    # --------------------------------------------------------------------------
     alias t="exec tmux"
+
+    # --------------------------------------------------------------------------
+    # System control
+    # --------------------------------------------------------------------------
     alias poweroff="systemctl poweroff"
+
+    # --------------------------------------------------------------------------
+    # File viewing
+    # --------------------------------------------------------------------------
     alias less="less -R"
+
+    # --------------------------------------------------------------------------
+    # GNOME terminal opacity control
+    # --------------------------------------------------------------------------
     alias opacity="dconf write /org/gnome/Ptyxis/Profiles/(dconf read /org/gnome/Ptyxis/default-profile-uuid|string trim -c\')/opacity"
+
+    # --------------------------------------------------------------------------
+    # QEMU virtualization
+    # --------------------------------------------------------------------------
     alias qemu="qemu-system-x86_64"
+
+    # --------------------------------------------------------------------------
+    # System logs
+    # --------------------------------------------------------------------------
     alias logs="journalctl -eu"
+
+    # --------------------------------------------------------------------------
+    # Julia REPL configuration
+    # --------------------------------------------------------------------------
     exists julia && alias julia="julia -q"
+
+    # --------------------------------------------------------------------------
+    # Bookmark manager
+    # --------------------------------------------------------------------------
     alias b="buku --deep"
 
+    # --------------------------------------------------------------------------
+    # Secret management
+    # --------------------------------------------------------------------------
     function hemlis
         wl-paste | \
             run0 --pipe sh -c "systemd-creds encrypt --user --uid=$(id -u) --with-key=host+tpm2 - $HOME/.secrets/$argv[1] && chown $USER:$USER $HOME/.secrets/$argv[1]"
     end
 
-    # alias stow="stow --no-folding"
+    # --------------------------------------------------------------------------
+    # Diceware password generator
+    # --------------------------------------------------------------------------
     if exists diceware
         alias diceware="diceware --no-caps -d ."
     end
 
+    # --------------------------------------------------------------------------
+    # Privilege escalation tools
+    # --------------------------------------------------------------------------
     if not [ $CONTAINER_ID ] && not [ $SSH_CLIENT ]
-        # if exists systemd-run && not exists run0
-        #     function run0
-        #         if [ $argv[1] ]
-        #             systemd-run -qdt $argv
-        #         else
-        #             systemd-run -qdtS
-        #         end
-        #     end
-        # end
-
-        # abbr run0 run0
-
         alias run0="run0 --pty"
-
-        # [ -f /etc/doas.conf ] && abbr run0 doas
     end
 
+    # --------------------------------------------------------------------------
+    # Modern ls alternatives
+    # --------------------------------------------------------------------------
     if exists eza
         functions -e ls
         function ls
@@ -79,15 +130,24 @@ if status --is-interactive
         alias ls="exa -1 --color=always"
     end
 
+    # --------------------------------------------------------------------------
+    # Archive utilities
+    # --------------------------------------------------------------------------
     if exists bsdtar
         abbr tar bsdtar
         abbr unzip "bsdtar xvf"
     end
 
+    # --------------------------------------------------------------------------
+    # Number base conversion utilities
+    # --------------------------------------------------------------------------
     function hex; python -c "print(hex($argv[1]))"; end
     function bin; python -c "print(bin($argv[1]))"; end
     function dec; python -c "print($argv[1])"; end
 
+    # --------------------------------------------------------------------------
+    # Portage configuration synchronization
+    # --------------------------------------------------------------------------
     function sync_portage_stuff
         set basepath $argv[1]
         function RSYNC -V basepath
@@ -105,18 +165,28 @@ if status --is-interactive
         # RSYNC /var/lib/portage/world_sets
     end
 
+    # --------------------------------------------------------------------------
+    # Emacs package management
+    # --------------------------------------------------------------------------
     function emacs-upgrade-pkgs
-        # if exists emacs && [ -f ~/.emacs.d/init.el ]
-        #     emacs -batch -l ~/.emacs.d/init.el -f package-upgrade-all
-        # end
         emacsclient -e '(package-upgrade-all)'
     end
 end
 
+# ============================================================================
+# Package manager aliases by distribution
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Emacs package upgrade
+# ----------------------------------------------------------------------------
 if exists emacs
     alias eu="emacs -batch -l ~/.emacs.d/init.el -f package-upgrade-all"
 end
 
+# ----------------------------------------------------------------------------
+# Privilege escalation selection
+# ----------------------------------------------------------------------------
 if [ $container ]
     set S sudo
     alias yabridgectl="HOME=$HOME/.local/share/yabridge-home /var/home/adam/.local/share/yabridge/yabridgectl"
@@ -124,6 +194,9 @@ else
     set S run0
 end
 
+# ----------------------------------------------------------------------------
+# Termux (Android) package management
+# ----------------------------------------------------------------------------
 if [ $TERMUX_VERSION ]
     set PKGM apt
 
@@ -134,6 +207,9 @@ if [ $TERMUX_VERSION ]
         sh -c "$PKGM update && $PKGM -u dist-upgrade"
     end
     alias c="sh -c \"$PKGM autoremove && $PKGM clean && $PKGM purge '~c'\""
+# ----------------------------------------------------------------------------
+# Debian/Ubuntu based systems
+# ----------------------------------------------------------------------------
 else if exists apt
     set PKGM apt
 
@@ -144,23 +220,35 @@ else if exists apt
         $S sh -c "$PKGM update && $PKGM -u dist-upgrade"
     end
     alias c="$S sh -c \"$PKGM autoremove && $PKGM clean && $PKGM purge '~c'\""
+# ----------------------------------------------------------------------------
+# Arch Linux based systems
+# ----------------------------------------------------------------------------
 else if exists pacman
     alias i="$S pacman -Sy"
     alias r="$S pacman -Rs"
     alias s="pacman -Ss"
     alias c="$S pacman -Scc --noconfirm"
     alias u="$S pacman -Syu"
+# ----------------------------------------------------------------------------
+# Gentoo Linux
+# ----------------------------------------------------------------------------
 else if exists emerge
     alias i="$S emerge --ask --autounmask --buildpkg --getbinpkg"
     alias r="$S emerge --unmerge"
     alias s="emerge --search"
     alias u="$S emaint --auto sync && $S emerge --buildpkg --ask --verbose --update --deep --newuse --getbinpkg @world"
     alias c="$S emerge --ask --depclean"
+# ----------------------------------------------------------------------------
+# FreeBSD
+# ----------------------------------------------------------------------------
 else if exists pkg
     alias i="pkg install"
     alias r="pkg remove"
     alias u="pkg upgrade"
     alias c="pkg clean; pkg autoclean"
+# ----------------------------------------------------------------------------
+# Fedora Silverblue (system extensions)
+# ----------------------------------------------------------------------------
 else if exists systemd-sysext
     function i
         set SYSEXT $argv[1]
@@ -192,6 +280,9 @@ else if exists systemd-sysext
             | jq -r '.[] | select(.type == "dir") | .name' \
             | string match -i -- "*"(string join ' ' -- $argv)"*"
     end
+# ----------------------------------------------------------------------------
+# Fedora Silverblue (rpm-ostree)
+# ----------------------------------------------------------------------------
 else if exists rpm-ostree
     function i
         rpm-ostree install $argv
@@ -208,6 +299,9 @@ else if exists rpm-ostree
     alias yay="distrobox    enter -n archlinux  -- yay"
     alias pac="distrobox    enter -n archlinux  -- pacman"
     alias pacman="distrobox enter -n archlinux  -- pacman"
+# ----------------------------------------------------------------------------
+# NixOS
+# ----------------------------------------------------------------------------
 else if exists nixos-rebuild && [ -z $CONTAINER_ID ]
     function u
         pushd /etc/nixos
@@ -221,30 +315,45 @@ else if exists nixos-rebuild && [ -z $CONTAINER_ID ]
 
     # For nextcloud
     alias occ="$S -u root podman exec -u 33 -it nextcloud-apache /var/www/html/occ"
+# ----------------------------------------------------------------------------
+# Debian/Ubuntu with nala
+# ----------------------------------------------------------------------------
 else if exists nala
     alias i="$S nala install"
     alias r="$S nala remove"
     alias s="nala search"
     alias u="$S nala upgrade"
     alias c="$S nala autoremove && $S nala autopurge"
+# ----------------------------------------------------------------------------
+# openSUSE
+# ----------------------------------------------------------------------------
 else if exists zypper
     alias i="$S zypper install"
     alias r="$S zypper remove"
     alias s="zypper search"
     alias c="$S zypper clean"
     alias u="$S zypper update -y"
+# ----------------------------------------------------------------------------
+# Fedora (dnf5)
+# ----------------------------------------------------------------------------
 else if exists dnf5
     alias i="$S dnf5 install"
     alias r="$S dnf5 remove"
     alias s="dnf5 search"
     alias c="$S dnf5 clean all"
     alias u="$S dnf5 upgrade --refresh"
+# ----------------------------------------------------------------------------
+# Fedora (dnf)
+# ----------------------------------------------------------------------------
 else if exists dnf
     alias i="$S dnf install"
     alias r="$S dnf remove"
     alias s="dnf search"
     alias c="$S dnf clean all"
     alias u="$S dnf upgrade --refresh"
+# ----------------------------------------------------------------------------
+# Void Linux
+# ----------------------------------------------------------------------------
 else if exists xbps-install
     alias i="$S xbps-install"
     alias r="$S xbps-remove"
