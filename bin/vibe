@@ -29,10 +29,13 @@ end
 
 rm -rf $build_dir
 
+set -l mistral_key (systemd-creds --user decrypt $HOME/.secrets/mistral)
+
 podman run -it --rm \
     -v $PWD:/workspace:z \
     -v $config_dir:/root/.vibe:Z \
     -e HOST_PWD=$PWD \
+    -e MISTRAL_API_KEY=$mistral_key \
     --security-opt label=disable \
     -w /workspace \
     $image_name

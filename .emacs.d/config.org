@@ -2476,6 +2476,6 @@ körverk syns som meddelande i ekorutan."
   (writeroom-mode-line t)
   (writeroom-fringes-outside-margins nil)
   (global-writeroom-mode t nil (writeroom-mode))
-  (writeroom-width 81)
+  (writeroom-width 80)
   (writeroom-maximize-window nil))
 #+end_src

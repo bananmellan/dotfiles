@@ -1,600 +1,432 @@
-#!/usr/bin/env fish
-#
-# backup.fish — personal backup script.
-#
-# Runs on boeka (Pixel, Termux). Everything is mirrored to bikupa
-# (boeka@bikupa). The script is intentionally modular: the himla modes that
-# were removed for now (mega/storj/proton/adb) can be re-added by following
-# the "Modes" section near the bottom.
-#
-# What --android does, in order:
-#
-#   1. Borg archive of the phone:
-#        $sdcard/Backup, $sdcard/Android/media, $HOME,
-#        $sdcard/.SeedVaultAndroidBackup
-#      → ssh://boeka@bikupa/var/lib/backup/telefon (create → prune → compact)
-#      The passphrase is fetched from bikupa with systemd-creds decrypt.
-#
-#   2. Mirror Signal backups:
-#        $sdcard/.molly → telefon-signalbackups
-#
-#   3. Mirror camera media and recordings, one bucket per year:
-#        $sdcard/DCIM/Camera     (current-year files) → telefon-DCIM/<year>
-#        $sdcard/DCIM/<year>     (archive)            → telefon-DCIM/<year>
-#        $sdcard/Audio Recorder  (current-year files) → telefon-inspelningar/<year>
-#        $sdcard/Audio Recorder/<year> (archive)      → telefon-inspelningar/<year>
-#
-# Year logic:
-#
-#   * On every run, files whose mtime year is not the current year are moved
-#     from the current directory into <archive-dir>/<file year>.
-#   * Only the current year is mirrored to bikupa. Older buckets on bikupa
-#     are never touched again.
-#   * Grace window: during the first $grace_months month(s) of the year, the
-#     previous year is mirrored as well, so files that land in the archive
-#     right after New Year still reach the server.
-#   * Safety net: each media tree records in $state_dir which previous year
-#     was last mirrored successfully. If the grace window was missed
-#     entirely (phone off, script not run), the next run after the window
-#     mirrors that year once (catch-up), then goes quiet again. Disable
-#     with: set catchup_if_window_missed false
-#
-# Runtime flags:
-#
-#   --verbose   more detail: borg create lists every file it considers,
-#               rsync prints transfer statistics, mkdir/mv print what they
-#               do, and decision-level debug output is shown.
-#
-#   --dry-run   preview without changing anything:
-#                 - mirrors run as rsync --dry-run (shows the transfer and
-#                   deletion list, writes nothing),
-#                 - Borg prune runs with --dry-run --list (reports which
-#                   archives the retention policy would delete),
-#                 - Borg create/compact are skipped (create --dry-run would
-#                   still scan every file on the phone),
-#                 - no files are moved, no directories or state files are
-#                   created.
-#               It still talks to bikupa over ssh (read-only): the
-#               passphrase fetch, prune preview and rsync previews all do.
-#
-# Error handling:
-#
-#   * Every step is wrapped in `must`, which aborts the whole script with a
-#     non-zero exit code as soon as anything fails.
-#   * Borg commands go through `must_borg` instead, which implements Borg's
-#     documented exit codes: rc 0 = success, rc 1 = warning ("operation
-#     reached its normal end, but there were warnings"), rc 2 = error.
-#     Warnings are not failures — the archive/operation succeeded — so they
-#     are logged and the script continues. Anything else aborts.
-#   * Borg's own volatile directories are excluded from the $HOME archive
-#     (see $borg_excludes) so that the known "nonce: file changed while we
-#     backed it up" warning cannot occur in the first place.
-#   * Two more situations are deliberately tolerated (warning only):
-#       - rsync exit code 24: files that vanished while the phone was in use.
-#       - a file that vanished between the find listing and its `mv`.
-#     Anything unexpected — including a find output line that cannot be
-#     parsed — aborts the run instead.
-#
-# Requirements on boeka (Termux):
-#
-#   pkg install borgbackup rsync openssh findutils coreutils
-#
-#   GNU find (findutils) is required by the archive step; the script checks
-#   for it and aborts with instructions if it is missing.
-#   Borg ≥ 1.4 is recommended (that is when BORG_EXIT_CODES appeared; older
-#   versions ignore the variable and already use the same legacy defaults).
+#!/usr/bin/env python3
+"""
+backup.py — personal backup script.
+
+Runs on boeka (Pixel, Termux). Everything is mirrored to bikupa
+(boeka@bikupa). The script is intentionally modular: the himla modes that
+were removed for now (mega/storj/proton/adb) can be re-added by extending
+the modes section.
+
+Usage:
+    python backup.py --android [-v | --verbose] [-n | --dry-run] [-h | --help]
+"""
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 # bikupa
-set -g srv boeka@bikupa
+SRV = "boeka@bikupa"
+SRV_BACKUP_ROOT = "/var/lib/backup"
+BORG_REPO = f"ssh://{SRV}{SRV_BACKUP_ROOT}/telefon"
 
-# NOTE: $srv_backup_root includes the leading slash on purpose. Borg records
-# the exact repository location string and treats a different string as a
-# moved repository ("was previously located at ..."), so $borg_repo must
-# compose to EXACTLY:
-#     ssh://boeka@bikupa/var/lib/backup/telefon
-# Writing "ssh://$srv/$srv_backup_root/..." would insert a second slash and
-# change the string.
-set -g srv_backup_root /var/lib/backup
-set -g borg_repo "ssh://$srv$srv_backup_root/telefon"
+# boeka (Termux)
+SDCARD = "/sdcard"
 
-# Pin the exit-code scheme so `must_borg` can rely on fixed semantics:
-# 0 = success, 1 = warning, 2 = error. (Unknown to older borg versions,
-# which ignore it — their defaults are the same legacy scheme.)
-set -gx BORG_EXIT_CODES legacy
+# Borg paths
+BORG_PATHS = [
+    f"{SDCARD}/Backup",
+    f"{SDCARD}/Android/media",
+    str(Path.home()),
+    f"{SDCARD}/.SeedVaultAndroidBackup",
+]
 
-# boeka
-set -g sdcard /sdcard
+# Borg excludes
+BORG_EXCLUDES = [
+    f"{Path.home()}/.config/borg/security",
+    f"{Path.home()}/.cache/borg",
+]
 
-# What goes into the Borg archive. NOTE: DCIM, Audio Recorder and .molly are
-# only rsync-mirrored today, never archived — consider adding them here as a
-# safety net:
-#   "$sdcard/DCIM" "$sdcard/Audio Recorder" "$sdcard/.molly"
-set -g borg_paths "$sdcard/Backup" "$sdcard/Android/media" "$HOME" "$sdcard/.SeedVaultAndroidBackup"
+# Year-window behavior
+GRACE_MONTHS = 1
+CATCHUP_IF_WINDOW_MISSED = True
+STATE_DIR = str(Path.home() / ".local" / "state" / "backup")
 
-# Borg's own volatile state must not be part of the $HOME archive: the
-# security nonce is rewritten on every commit and the cache changes during
-# every create, so including them makes borg warn about files that changed
-# while being backed up — on every run. The keys directory is deliberately
-# NOT excluded (that is the repokey cache and worth backing up).
-set -g borg_excludes "$HOME/.config/borg/security" "$HOME/.cache/borg"
-
-# Year-window behaviour
-set -g grace_months 1                # months into the year the previous year is still mirrored
-set -g catchup_if_window_missed true # mirror the previous year once if its window was missed
-set -g state_dir "$HOME/.local/state/backup"
-
-# Runtime flags — defaults, flipped by main from --verbose / --dry-run
-set -g verbose false
-set -g dry_run false
+# Runtime flags
+verbose = False
+dry_run = False
 
 # ---------------------------------------------------------------------------
-# Generic helpers
+# Logging helpers
 # ---------------------------------------------------------------------------
 
-function log
-    echo "backup: $argv"
-end
+def log(message: str) -> None:
+    """Print informational message."""
+    print(f"backup: {message}")
 
-function warn
-    echo "backup: warning: $argv" >&2
-end
+def warn(message: str) -> None:
+    """Print warning message to stderr."""
+    print(f"backup: warning: {message}", file=sys.stderr)
 
-function die
-    echo "backup: fatal: $argv" >&2
-    exit 1
-end
-
-# Run a command and abort the whole script if it exits non-zero.
-# Plain commands only — no pipes, redirects or command substitutions.
-function must
-    $argv
-    set -l code $status
-    if test $code -ne 0
-        die "command failed (exit $code): $argv"
-    end
-end
-
-# Run a borg command with warning-tolerant exit-code handling, per Borg's
-# documented return codes:
-#   rc 0          success
-#   rc 1          generic warning — the operation reached its normal end
-#                 (e.g. a file changed while being read); warn and continue
-#   rc 100..127   specific warnings (only in modern mode, but tolerated too)
-#   rc 2          generic error — abort
-#   rc 3..99      specific errors (modern mode) — abort
-#   rc 128+N      killed by signal N — abort
-function must_borg
-    $argv
-    set -l code $status
-    switch $code
-        case 0
-            return 0
-        case 1
-            warn "borg completed with warnings (exit 1) — operation succeeded, check the log above"
-            return 0
-        case '*'
-            if test $code -ge 100; and test $code -le 127
-                warn "borg completed with warnings (exit $code) — operation succeeded, check the log above"
-                return 0
-            end
-            die "borg failed (exit $code): $argv"
-    end
-end
-
-function usage
-    echo "usage: backup.fish [--android] [-v | --verbose] [-n | --dry-run] [-h | --help]"
-    echo
-    echo "modes:"
-    echo "  -a, --android     boeka (Termux): Borg archive + mirrors to bikupa"
-    echo
-    echo "options:"
-    echo "  -v, --verbose     detailed output (file lists, transfer stats, decisions)"
-    echo "  -n, --dry-run     preview only — nothing is written on boeka or bikupa"
-    echo "  -h, --help        show this help and exit"
-end
-
-function verbose_on
-    test "$verbose" = true
-end
-
-function dry_run_on
-    test "$dry_run" = true
-end
-
-# Detail output, only shown with --verbose.
-function debug
-    if verbose_on
-        echo "backup: debug: $argv"
-    end
-end
-
-# Report an action that --dry-run skips.
-function dry_note
-    echo "backup: [dry-run] $argv"
-end
-
-# Render a pattern list as rsync/rclone-style --exclude arguments.
-function exclude_args
-    for pattern in $argv
-        printf '%s\n' "--exclude=$pattern"
-    end
-end
+def die(message: str) -> None:
+    """Abort with fatal error message."""
+    print(f"backup: fatal: {message}", file=sys.stderr)
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# bikupa destinations
+# Command execution
 # ---------------------------------------------------------------------------
 
-# Mirror the CONTENTS of <src>/ into <dst> on bikupa (rsync --delete).
-# Exit code 24 ("some files vanished before they could be transferred") is
-# treated as success with a warning: files disappearing while the phone is
-# in use are benign, and aborting the whole run over them would be worse.
-function srv_sync
-    set -l src $argv[1]
-    set -l dst $argv[2]
-    set -l excludes $argv[3..-1]
+def must(args: list[str], **kwargs) -> None:
+    """Run command, abort on failure."""
+    log(f"running: {' '.join(args)}")
+    try:
+        subprocess.run(args, check=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        die(f"command failed (exit {e.returncode}): {' '.join(args)}")
 
-    # set treats everything after the variable name as values, so flags
-    # starting with a dash can be built into a list directly.
-    set -l rsync_flags -avzp --delete
-    if verbose_on
-        set -a rsync_flags --stats
-    end
-    if dry_run_on
-        set -a rsync_flags --dry-run
-    end
+def must_borg(args: list[str], **kwargs) -> None:
+    """Run borg command with special exit code handling."""
+    log(f"running: {' '.join(args)}")
+    env = os.environ.copy()
+    env["BORG_EXIT_CODES"] = "legacy"
+    try:
+        result = subprocess.run(args, env=env, **kwargs)
+        rc = result.returncode
 
-    if test (count $excludes) -gt 0
-        debug "rsync excludes: "(string join ', ' -- $excludes)
-    end
-
-    rsync $rsync_flags (exclude_args $excludes) "$src/" "$srv:$dst"
-    set -l code $status
-
-    switch $code
-        case 0
-            return 0
-        case 24
-            warn "rsync: some files vanished during transfer (exit 24) — treated as success"
-            return 0
-        case '*'
-            warn "rsync failed (exit $code)"
-            return 1
-    end
-end
-
-# Fan-out point for mirrors: when cloud destinations are re-added, dispatch
-# them here alongside srv_sync (see the Modes section).
-function rcmd
-    set -l src $argv[1]
-    set -l dst $argv[2]
-    set -l excludes $argv[3..-1]
-
-    if dry_run_on
-        log "would mirror $src → $srv:$dst (rsync --dry-run)"
-    else
-        log "mirroring $src → $srv:$dst"
-    end
-    srv_sync "$src" "$dst" $excludes
-end
+        if rc == 0:
+            return
+        elif rc == 1:
+            warn("borg completed with warnings (exit 1) — operation succeeded, check the log above")
+            return
+        elif 100 <= rc <= 127:
+            warn(f"borg completed with warnings (exit {rc}) — operation succeeded, check the log above")
+            return
+        else:
+            die(f"borg failed (exit {rc}): {' '.join(args)}")
+    except Exception as e:
+        die(f"borg failed with exception: {e}")
 
 # ---------------------------------------------------------------------------
-# Borg
+# Runtime helpers
 # ---------------------------------------------------------------------------
 
-# Runs on bikupa over ssh; the secret is stored there with systemd-creds.
-# Read-only, so it runs in --dry-run too (the prune preview needs it).
-function fetch_borg_passphrase
-    log "fetching Borg passphrase from $srv"
-    set -gx BORG_PASSPHRASE (ssh $srv systemd-creds --user decrypt .secrets/borg-telefon)
-    if test -z "$BORG_PASSPHRASE"
-        die "could not fetch the Borg passphrase from $srv (empty output — check ssh and systemd-creds)"
-    end
-end
+def verbose_on() -> bool:
+    return verbose
 
-function borg_backup
-    # In dry-run, only prune runs (read-only, as a preview of what the
-    # retention policy would delete). create --dry-run would still scan
-    # every source file on the phone, and compact --dry-run does nothing,
-    # so both are just reported.
-    if dry_run_on
-        log "would create Borg archive $borg_repo::boeka-{now:%Y-%m-%d_%H:%M:%S} of: $borg_paths"
-        log "prune preview (--dry-run)"
-        must_borg borg prune --dry-run --list --keep-weekly 4 --keep-monthly 4 "$borg_repo"
-        log "would compact $borg_repo"
-        return 0
-    end
+def dry_run_on() -> bool:
+    return dry_run
 
-    log "creating Borg archive"
-    set -l create_flags --progress --stats --lock-wait 600
-    if verbose_on
-        # --list prints every file considered while the archive is built
-        set -a create_flags --list
-    end
-    for pattern in $borg_excludes
-        set -a create_flags --exclude $pattern
-    end
-    must_borg borg create $create_flags \
-        "$borg_repo::boeka-{now:%Y-%m-%d_%H:%M:%S}" \
-        $borg_paths
+def debug(message: str) -> None:
+    if verbose_on():
+        log(f"debug: {message}")
 
-    log "pruning"
-    must_borg borg prune --list --keep-weekly 4 --keep-monthly 4 "$borg_repo"
-    # Stronger policy to consider once the size impact is known:
-    #   --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --keep-yearly 2
+def dry_note(message: str) -> None:
+    log(f"[dry-run] {message}")
 
-    log "compacting"
-    must_borg borg compact "$borg_repo"
-end
+def exclude_args(patterns: list[str]) -> list[str]:
+    """Render patterns as rsync --exclude arguments."""
+    return [f"--exclude={p}" for p in patterns]
+
+def in_grace_window() -> bool:
+    """True during the months right after a year switch."""
+    return datetime.now().month <= GRACE_MONTHS
+
+def ensure_gnu_find() -> bool:
+    """Verify GNU find (findutils) is available."""
+    try:
+        result = subprocess.run(["find", "--version"], capture_output=True, text=True)
+        return "GNU" in result.stdout
+    except Exception:
+        warn("GNU find is required (install with: pkg install findutils)")
+        return False
+
+# ---------------------------------------------------------------------------
+# Server operations
+# ---------------------------------------------------------------------------
+
+def srv_sync(src: str, dst: str, excludes: list[str] | None = None) -> None:
+    """Mirror CONTENTS of src/ into dst on bikupa (rsync --delete)."""
+    rsync_flags = ["-avzp", "--delete"]
+    if verbose_on():
+        rsync_flags.append("--stats")
+    if dry_run_on():
+        rsync_flags.append("--dry-run")
+
+    cmd = ["rsync"] + rsync_flags
+    if excludes:
+        cmd.extend(exclude_args(excludes))
+    cmd.extend([f"{src}/", f"{SRV}:{dst}"])
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        rc = result.returncode
+
+        if rc == 0:
+            return
+        elif rc == 24:
+            warn("rsync: some files vanished during transfer (exit 24) — treated as success")
+            return
+        else:
+            die(f"rsync failed (exit {rc})")
+    except Exception as e:
+        die(f"rsync failed with exception: {e}")
+
+def fetch_borg_passphrase() -> None:
+    """Fetch Borg passphrase from bikupa via ssh."""
+    log(f"fetching Borg passphrase from {SRV}")
+    try:
+        result = subprocess.run(
+            ["ssh", SRV, "systemd-creds", "--user", "decrypt", ".secrets/borg-telefon"],
+            capture_output=True, text=True, check=True
+        )
+        passphrase = result.stdout.strip()
+        if not passphrase:
+            die(f"could not fetch Borg passphrase from {SRV} (empty output — check ssh and systemd-creds)")
+        os.environ["BORG_PASSPHRASE"] = passphrase
+    except subprocess.CalledProcessError as e:
+        die(f"could not fetch Borg passphrase: {e}")
+
+# ---------------------------------------------------------------------------
+# Borg operations
+# ---------------------------------------------------------------------------
+
+def borg_backup() -> None:
+    """Create Borg archive, prune, and compact."""
+    archive_name = f"boeka-{datetime.now():%Y-%m-%d_%H:%M:%S}"
+
+    if dry_run_on():
+        log(f"would create Borg archive {BORG_REPO}::{archive_name} of: {' '.join(BORG_PATHS)}")
+        log("prune preview (--dry-run)")
+        must_borg(["borg", "prune", "--dry-run", "--list", "--keep-weekly", "4", "--keep-monthly", "4", BORG_REPO])
+        log(f"would compact {BORG_REPO}")
+        return
+
+    log("creating Borg archive")
+    create_flags = ["--progress", "--stats", "--lock-wait", "600"]
+    if verbose_on():
+        create_flags.append("--list")
+    for pattern in BORG_EXCLUDES:
+        create_flags.extend(["--exclude", pattern])
+
+    must_borg(["borg", "create"] + create_flags + [f"{BORG_REPO}::{archive_name}"] + BORG_PATHS)
+
+    log("pruning")
+    must_borg(["borg", "prune", "--list", "--keep-weekly", "4", "--keep-monthly", "4", BORG_REPO])
+
+    log("compacting")
+    must_borg(["borg", "compact", BORG_REPO])
 
 # ---------------------------------------------------------------------------
 # Media: yearly archive + mirror
 # ---------------------------------------------------------------------------
 
-function in_grace_window --description 'True during the months right after a year switch'
-    test (math (date +%m)) -le $grace_months
-end
+def archive_old_files(curdir: str, arcdir: str) -> None:
+    """Move files whose mtime year is not current year into archive dir."""
+    year = str(datetime.now().year)
+    prev_year = str(datetime.now().year - 1)
+    moved_years: set[str] = set()
+    moved_count = 0
+    tab = '\t'
 
-function ensure_gnu_find --description 'Verify that GNU find (findutils) is available'
-    if find --version 2>/dev/null | string match -q '*GNU*'
-        return 0
-    end
-    warn "GNU find is required for the archive step (install with: pkg install findutils)"
-    return 1
-end
+    v_args = ["-v"] if verbose_on() else []
 
-# Move every top-level file in <curdir> whose mtime year is not the current
-# year into <arcdir>/<file year>. Files only — never directories, never
-# dotfiles (those stay put and are excluded from the mirrors).
-#
-# NOTE on the tab separator: fish does not expand escape sequences inside
-# quotes, so "\t" is literally backslash-t, not a tab. The tab is therefore
-# obtained from printf, which does interpret escapes. Getting this wrong
-# makes every split fail: the path ends up empty and mkdir creates junk
-# directories named "<year><TAB>..." under the archive dir.
-function archive_old_files
-    set -l curdir $argv[1]
-    set -l arcdir $argv[2]
-    set -l year (date +%Y)
-    set -l prev_year (math $year - 1)
-    set -l moved_years
-    set -l moved_count 0
-    set -l tab (printf '\t')
+    # Use GNU find to list files
+    try:
+        result = subprocess.run(
+            ["find", curdir, "-maxdepth", "1", "-type", "f", "-not", "-name", ".*",
+             "-printf", f"%TY{tab}%p\\n"],
+            capture_output=True, text=True, check=True
+        )
+        listing = result.stdout.strip().split('\n')
+    except subprocess.CalledProcessError as e:
+        die(f"find failed on '{curdir}': {e}")
 
-    # -v makes mkdir/mv print each directory created / file moved
-    set -l v
-    if verbose_on
-        set -a v -v
-    end
+    debug(f"found {len(listing)} file(s) in {curdir}")
 
-    set -l listing (find "$curdir" -maxdepth 1 -type f -not -name '.*' -printf '%TY\t%p\n')
-    if test $status -ne 0
-        die "find failed on '$curdir'"
-    end
-
-    debug "found "(count $listing)" file(s) in $curdir"
-
-    for entry in $listing
-        set -l parts (string split -m 1 -- "$tab" $entry)
-
-        # A listing line that cannot be parsed is a script/environment bug,
-        # not a vanished file — abort instead of silently skipping files.
-        if test (count $parts) -lt 2
-            die "could not parse find output line: '$entry' (expected '<year><TAB><path>')"
-        end
-
-        set -l file_year $parts[1]
-        set -l file $parts[2]
-
-        # Sanity-check the year so a broken parse can never create junk
-        # directories under the archive dir again.
-        if not string match -qr '^[0-9]{4}$' -- "$file_year"
-            die "unexpected year '$file_year' in find output — refusing to archive"
-        end
-
-        test "$file_year" = "$year"; and continue
-
-        if not test -e "$file"
-            # Vanished between the find listing and now — benign on a live
-            # phone, warn and move on.
-            warn "'$file' vanished during archiving — skipping"
+    for entry in listing:
+        if not entry:
             continue
-        end
 
-        if dry_run_on
-            dry_note "would move '$file' → '$arcdir/$file_year/'"
-        else
-            if not mkdir $v -p "$arcdir/$file_year"
-                die "could not create '$arcdir/$file_year/'"
-            end
+        parts = entry.split(tab, 1)
+        if len(parts) < 2:
+            die(f"could not parse find output line: '{entry}' (expected '<year><TAB><path>')")
 
-            if not mv $v "$file" "$arcdir/$file_year/"
-                die "could not move '$file' into '$arcdir/$file_year/'"
-            end
-        end
+        file_year, file_path = parts[0], parts[1]
 
-        set moved_count (math $moved_count + 1)
-        if not contains -- $file_year $moved_years
-            set -a moved_years $file_year
-        end
-    end
+        if not re.match(r'^[0-9]{4}$', file_year):
+            die(f"unexpected year '{file_year}' in find output — refusing to archive")
 
-    if test $moved_count -gt 0
-        if dry_run_on
-            log "would archive $moved_count file(s) from $curdir into "(string join ', ' $moved_years)
-        else
-            log "archived $moved_count file(s) from $curdir into "(string join ', ' $moved_years)
-        end
-    end
+        if file_year == year:
+            continue
 
-    # Only the previous year is mirrored (during the window). Flag anything
-    # that ends up in the archive but will not reach bikupa.
-    for y in $moved_years
-        if test "$y" = "$prev_year"
-            if not in_grace_window
-                log "note: files from $y land in the archive after the grace window — they only reach bikupa if the last-year catch-up has not run yet"
-            end
-        else
-            warn "files from $y end up in '$arcdir/$y' but will NOT be mirrored (only $prev_year and $year are mirrored) — make sure they are covered by the Borg archive"
-        end
-    end
-end
+        if not os.path.exists(file_path):
+            warn(f"'{file_path}' vanished during archiving — skipping")
+            continue
 
-# Mirror the previous year's bucket:
-#   * during the grace window: on every run (idempotent),
-#   * after the window: once, if the window was missed (state file).
-# Usage: sync_previous_year <archive-dir> <target-dir> [exclude patterns...]
-function sync_previous_year
-    set -l arcdir $argv[1]
-    set -l trgdir $argv[2]
-    set -l excludes $argv[3..-1]
-    set -l prev_year (math (date +%Y) - 1)
+        target_dir = os.path.join(arcdir, file_year)
+        if dry_run_on():
+            dry_note(f"would move '{file_path}' -> '{target_dir}/'")
+        else:
+            if v_args:
+                log(f"mkdir -p {target_dir}")
+            os.makedirs(target_dir, exist_ok=True)
 
-    test -d "$arcdir/$prev_year"; or return 0
+            if v_args:
+                log(f"mv {file_path} {target_dir}/")
+            shutil.move(file_path, target_dir)
 
-    # Per-tree state file, so each media tree tracks its own catch-up.
-    set -l state_file "$state_dir/prev-year-synced-"(path basename "$trgdir")
-    set -l last_synced
-    if test -f "$state_file"
-        set last_synced (cat "$state_file")
-    end
+        moved_count += 1
+        moved_years.add(file_year)
 
-    debug "catch-up state file: $state_file (last mirrored prev year: '$last_synced')"
+    if moved_count > 0:
+        years_str = ", ".join(sorted(moved_years))
+        action = "would archive" if dry_run_on() else "archived"
+        log(f"{action} {moved_count} file(s) from {curdir} into {years_str}")
 
-    if in_grace_window
-        log "grace window active — mirroring last year ($prev_year) as well"
-    else if test "$last_synced" = "$prev_year"
-        return 0
-    else if test "$catchup_if_window_missed" != true
-        return 0
-    else
-        log "grace window was missed — catching up on last year ($prev_year)"
-    end
+    for y in sorted(moved_years):
+        if y == prev_year:
+            if not in_grace_window():
+                log(f"note: files from {y} land in the archive after the grace window — "
+                    "they only reach bikupa if the last-year catch-up has not run yet")
+        else:
+            warn(f"files from {y} end up in '{arcdir}/{y}' but will NOT be mirrored "
+                 f"(only {prev_year} and {year} are mirrored) — make sure they are covered by the Borg archive")
 
-    must rcmd "$arcdir/$prev_year" "$trgdir/$prev_year" $excludes
+def sync_previous_year(arcdir: str, trgdir: str, excludes: list[str] | None = None) -> None:
+    """Mirror the previous year's bucket."""
+    prev_year = str(datetime.now().year - 1)
+    archive_path = os.path.join(arcdir, prev_year)
 
-    # The state file is only written after a real successful mirror, so a
-    # dry-run never "uses up" a pending catch-up.
-    if dry_run_on
-        dry_note "would record catch-up state in $state_file"
-    else
-        must mkdir -p "$state_dir"
-        echo "$prev_year" > "$state_file"
-    end
-end
+    if not os.path.isdir(archive_path):
+        return
 
-# Orchestrate one media tree: archive old files → mirror current year →
-# mirror previous year when applicable.
-function media_sync
-    argparse 'c/current-dir=' 'a/archive-dir=' 't/target-dir=' 'e/exclude=+' -- $argv; or return 1
+    state_file = os.path.join(STATE_DIR, f"prev-year-synced-{os.path.basename(trgdir)}")
+    last_synced = None
+    if os.path.isfile(state_file):
+        with open(state_file, 'r') as f:
+            last_synced = f.read().strip()
 
-    set -l curdir $_flag_current_dir
-    set -l arcdir $_flag_archive_dir
-    set -l trgdir $_flag_target_dir
-    set -l excludes $_flag_exclude
+    debug(f"catch-up state file: {state_file} (last mirrored prev year: '{last_synced}')")
 
-    if not test -d "$curdir"
-        warn "'$curdir' does not exist — aborting"
+    if in_grace_window():
+        log(f"grace window active — mirroring last year ({prev_year}) as well")
+    elif last_synced == prev_year:
+        return
+    elif not CATCHUP_IF_WINDOW_MISSED:
+        return
+    else:
+        log(f"grace window was missed — catching up on last year ({prev_year})")
+
+    rcmd(archive_path, os.path.join(trgdir, prev_year), excludes or [])
+
+    if dry_run_on():
+        dry_note(f"would record catch-up state in {state_file}")
+    else:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(state_file, 'w') as f:
+            f.write(prev_year)
+
+def rcmd(src: str, dst: str, excludes: list[str] | None = None) -> None:
+    """Fan-out point for mirrors."""
+    if dry_run_on():
+        log(f"would mirror {src} -> {SRV}:{dst} (rsync --dry-run)")
+    else:
+        log(f"mirroring {src} -> {SRV}:{dst}")
+    srv_sync(src, dst, excludes)
+
+def media_sync(current_dir: str, archive_dir: str, target_dir: str, excludes: list[str] | None = None) -> int:
+    """Orchestrate one media tree: archive old files -> mirror current year -> mirror previous year."""
+    year = str(datetime.now().year)
+
+    if not os.path.isdir(current_dir):
+        warn(f"'{current_dir}' does not exist — aborting")
         return 1
-    end
 
-    if not ensure_gnu_find
+    if not ensure_gnu_find():
         return 1
-    end
 
-    set -l year (date +%Y)
+    archive_old_files(current_dir, archive_dir)
 
-    archive_old_files "$curdir" "$arcdir"
+    log(f"mirroring current year ({year})")
+    rcmd(current_dir, os.path.join(target_dir, year), excludes or [])
 
-    log "mirroring current year ($year)"
-    must rcmd "$curdir" "$trgdir/$year" $excludes
-
-    sync_previous_year "$arcdir" "$trgdir" $excludes
-end
+    sync_previous_year(archive_dir, target_dir, excludes or [])
+    return 0
 
 # ---------------------------------------------------------------------------
 # Modes
-#
-# A mode is four things:
-#   1. a flag in main's argparse (e.g. 'm/mega'),
-#   2. a dispatch block in main,
-#   3. a line in usage(),
-#   4. its own function in this section, built from the helpers above.
-# All mutation must go through `must`/must_borg/rcmd/archive_old_files/
-# sync_previous_year so that --dry-run keeps working for free.
-#
-# Example — the removed mega mode, ready to paste back:
-#
-# function mega_sync
-#     for dir in (find ~/.backup/Bilder -mindepth 1 -maxdepth 1 -type d)
-#         set -l name (path basename "$dir")
-#         rclone sync --progress "$dir" "mega.crypt:/Bilder/$name"
-#     end
-# end
 # ---------------------------------------------------------------------------
 
-function android_backup
-    log "starting android backup"
+def android_backup() -> None:
+    """Android/Termux backup mode."""
+    log("starting android backup")
 
-    fetch_borg_passphrase
+    fetch_borg_passphrase()
+    borg_backup()
 
-    borg_backup
+    log("mirroring Signal backups")
+    rcmd(os.path.join(SDCARD, ".molly"), os.path.join(SRV_BACKUP_ROOT, "telefon-signalbackups"))
 
-    log "mirroring Signal backups"
-    must rcmd "$sdcard/.molly" "$srv_backup_root/telefon-signalbackups"
+    log("syncing camera media")
+    media_sync(
+        current_dir=os.path.join(SDCARD, "DCIM/Camera"),
+        archive_dir=os.path.join(SDCARD, "DCIM"),
+        target_dir=os.path.join(SRV_BACKUP_ROOT, "telefon-DCIM"),
+        excludes=[".trashed*", ".pending*"]
+    )
 
-    log "syncing camera media"
-    must media_sync \
-        --current-dir "$sdcard/DCIM/Camera" \
-        --archive-dir "$sdcard/DCIM" \
-        --target-dir "$srv_backup_root/telefon-DCIM" \
-        --exclude ".trashed*" \
-        --exclude ".pending*"
-
-    log "syncing recordings"
-    must media_sync \
-        --current-dir "$sdcard/Audio Recorder" \
-        --archive-dir "$sdcard/Audio Recorder" \
-        --target-dir "$srv_backup_root/telefon-inspelningar" \
-        --exclude "*/"
-end
+    log("syncing recordings")
+    media_sync(
+        current_dir=os.path.join(SDCARD, "Audio Recorder"),
+        archive_dir=os.path.join(SDCARD, "Audio Recorder"),
+        target_dir=os.path.join(SRV_BACKUP_ROOT, "telefon-inspelningar"),
+        excludes=["*/"]
+    )
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-function main
-    argparse 'a/android' 'h/help' 'v/verbose' 'n/dry-run' -- $argv; or begin
-        usage
-        exit 2
-    end
+def usage() -> None:
+    print("usage: backup [--android] [-v | --verbose] [-n | --dry-run] [-h | --help]")
+    print()
+    print("modes:")
+    print("  -a, --android     boeka (Termux): Borg archive + mirrors to bikupa")
+    print()
+    print("options:")
+    print("  -v, --verbose     detailed output (file lists, transfer stats, decisions)")
+    print("  -n, --dry-run     preview only — nothing is written on boeka or bikupa")
+    print("  -h, --help        show this help and exit")
 
-    if set -q _flag_help
-        usage
-        exit 0
-    end
+def main() -> None:
+    global verbose, dry_run
 
-    if set -q _flag_verbose
-        set -g verbose true
-    end
-    if set -q _flag_dry_run
-        set -g dry_run true
-    end
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-a", "--android", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("-v", "--verbose", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("-n", "--dry-run", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("-h", "--help", action="store_true", help=argparse.SUPPRESS)
 
-    if not set -q _flag_android
-        usage
-        die "no mode selected"
-    end
+    args = parser.parse_args()
 
-    if dry_run_on
-        log "DRY RUN — nothing will be written on boeka or bikupa"
-    end
+    if args.help:
+        usage()
+        sys.exit(0)
 
-    android_backup; or die "android backup failed"
-    log "all done"
-end
+    if args.verbose:
+        verbose = True
+    if args.dry_run:
+        dry_run = True
 
-main $argv
+    if not args.android:
+        usage()
+        die("no mode selected")
+
+    if dry_run_on():
+        log("DRY RUN — nothing will be written on boeka or bikupa")
+
+    android_backup()
+    log("all done")
+
+if __name__ == "__main__":
+    main()
