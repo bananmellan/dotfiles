@@ -365,13 +365,13 @@ def android_backup() -> None:
     borg_backup()
 
     log("mirroring Signal backups")
-    rcmd(os.path.join(SDCARD, ".molly"), os.path.join(SRV_BACKUP_ROOT, "telefon-signalbackups"))
+    rcmd(os.path.join(SDCARD, ".molly"), os.path.join(SRV_BACKUP_ROOT, "signal"))
 
     log("syncing camera media")
     media_sync(
         current_dir=os.path.join(SDCARD, "DCIM/Camera"),
         archive_dir=os.path.join(SDCARD, "DCIM"),
-        target_dir=os.path.join(SRV_BACKUP_ROOT, "telefon-DCIM"),
+        target_dir=os.path.join(SRV_BACKUP_ROOT, "bilder"),
         excludes=[".trashed*", ".pending*"]
     )
 
@@ -379,7 +379,7 @@ def android_backup() -> None:
     media_sync(
         current_dir=os.path.join(SDCARD, "Audio Recorder"),
         archive_dir=os.path.join(SDCARD, "Audio Recorder"),
-        target_dir=os.path.join(SRV_BACKUP_ROOT, "telefon-inspelningar"),
+        target_dir=os.path.join(SRV_BACKUP_ROOT, "inspelningar"),
         excludes=["*/"]
     )
 

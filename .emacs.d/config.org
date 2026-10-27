@@ -81,7 +81,7 @@
   "Non‑nil when Emacs can display a graphical interface.")
 
 (use-package emacs
-  ;; :if window-system
+  :if (not (getenv "TERMUX_VERSION"))
 
   :init
   (add-to-list 'default-frame-alist '(height . 50))
@@ -105,7 +105,7 @@
 ** Mode line
 #+begin_src emacs-lisp
 (use-package doom-modeline :ensure
-  ;; :if (and (not (getenv "TERMUX_VERSION")) window-system)
+  :if (not (getenv "TERMUX_VERSION"))
 
   :init
   (use-package all-the-icons :ensure)
@@ -130,8 +130,6 @@
 ** Theming
 #+begin_src emacs-lisp
 (use-package modus-themes :ensure
-  ;; :if window-system
-
   :init
 
   ;; Activates dark theme.
@@ -141,11 +139,18 @@
 
   ;; Activates appropriate dark or light theme depending on what state the
   ;; desktop is in on startup.
-  (if (string-match-p
-       "dark"
-       (shell-command-to-string
-    "gsettings get org.gnome.desktop.interface color-scheme"))
-      (my/dark) (my/light))
+  (if (getenv "TERMUX_VERSION")
+      ;; In Termux - use dark theme between 9pm and 9am
+      (let ((current-hour (nth 2 (decode-time (current-time)))))
+        (if (or (>= current-hour 21) (< current-hour 9))
+            (my/dark)
+          (my/light)))
+    ;; Not in Termux - use existing desktop logic
+    (if (string-match-p
+         "prefer-dark"
+         (shell-command-to-string
+      "dconf read /org/gnome/desktop/interface/color-scheme"))
+        (my/dark) (my/light)))
 
   ;; Toggle light/dark theme.
   :bind ([f5] . modus-themes-toggle)
@@ -339,7 +344,7 @@
   (org-agenda-window-setup 'current-window)
 
   (org-confirm-elisp-link-function nil)
-  (org-directory (getenv "ORG_DIR"))
+  (org-directory (or (getenv "ORG_DIR") (concat (getenv "HOME") "/.org")))
 
   ;; Export
   (org-export-with-author nil)
@@ -1519,10 +1524,12 @@ körverk syns som meddelande i ekorutan."
 #+end_src
 ** Nerd Icons
 #+begin_src emacs-lisp
-(use-package nerd-icons :ensure)
+(use-package nerd-icons :ensure
+  :if (not (getenv "TERMUX_VERSION")))
 
 (use-package nerd-icons-completion :ensure
   :after (marginalia nerd-icons)
+  :if (not (getenv "TERMUX_VERSION"))
   :config
   (nerd-icons-completion-mode)
   (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup)
@@ -1743,6 +1750,7 @@ körverk syns som meddelande i ekorutan."
           ;; ("<C-tab>" . dired-subtree-cycle)))
 
 (use-package nerd-icons-dired :ensure :after dired
+  :if (not (getenv "TERMUX_VERSION"))
   :hook (dired-mode . nerd-icons-dired-mode))
 
 (use-package dired-hide-dotfiles :ensure :after dired
@@ -1761,6 +1769,7 @@ körverk syns som meddelande i ekorutan."
 *** COMMENT Dirvish
 #+begin_src emacs-lisp
 (use-package dirvish :ensure
+  :if (not (getenv "TERMUX_VERSION"))
   :init
   (dirvish-override-dired-mode)
   :config

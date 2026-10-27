@@ -1,5 +1,6 @@
 ;;; -*- lexical-binding: t; -*-
-(set-background-color "#000000")
+(unless (getenv "TERMUX_VERSION")
+  (set-background-color "#000000"))
 (setq vc-follow-symlinks t)
 ;; (set-frame-parameter nil 'alpha-background 100)
 ;; (add-to-list 'default-frame-alist '(fullscreen . maximized))
