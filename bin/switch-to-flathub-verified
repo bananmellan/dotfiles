@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OLD_REMOTE="flathub"
+NEW_REMOTE="flathub-verified"
+DRY_RUN=0
+
+usage() {
+    echo "Usage: $0 [--dry-run]"
+}
+
+# arg parsing
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|-n) DRY_RUN=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $arg" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+# sanity checks
+if ! flatpak --user remotes | grep -q "^${OLD_REMOTE}"; then
+    echo "Remote '$OLD_REMOTE' not found in --user config" >&2
+    exit 1
+fi
+if ! flatpak --user remotes | grep -q "^${NEW_REMOTE}"; then
+    echo "Remote '$NEW_REMOTE' not found in --user config" >&2
+    exit 1
+fi
+
+# only apps that exist on both remotes
+switchable=()
+skipped=()
+while read -r app; do
+    if flatpak --user remote-info --app "$NEW_REMOTE" "$app" >/dev/null 2>&1; then
+        switchable+=("$app")
+    else
+        skipped+=("$app")
+    fi
+done < <(flatpak --user list --app --columns=application,origin \
+    | awk -v old="$OLD_REMOTE" '$2 == old { print $1 }')
+
+if [ "${#skipped[@]}" -gt 0 ]; then
+    echo "Skipping ${#skipped[@]} app(s) not available on $NEW_REMOTE:"
+    printf '  %s\n' "${skipped[@]}"
+fi
+
+if [ "${#switchable[@]}" -eq 0 ]; then
+    echo "Nothing to switch."
+    exit 0
+fi
+
+echo "Switching ${#switchable[@]} app(s) from $OLD_REMOTE to $NEW_REMOTE:"
+
+for app in "${switchable[@]}"; do
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "[dry-run] would reinstall $app from $NEW_REMOTE"
+        continue
+    fi
+    echo "=== $app ==="
+    if ! flatpak --user uninstall --noninteractive "$app" \
+       || ! flatpak --user install --noninteractive "$NEW_REMOTE" "$app"; then
+        echo "Failed to switch $app, reinstalling from $OLD_REMOTE" >&2
+        if ! flatpak --user install --noninteractive "$OLD_REMOTE" "$app"; then
+            echo "WARNING: $app could not be restored from $OLD_REMOTE" >&2
+        fi
+    fi
+done
+
+# clean up old runtimes no longer referenced
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] would run: flatpak --user uninstall --unused"
+else
+    flatpak --user uninstall --unused --noninteractive
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] no changes were made"
+    exit 0
+fi
+
+echo "Done. Current origins:"
+flatpak --user list --columns=application,origin
