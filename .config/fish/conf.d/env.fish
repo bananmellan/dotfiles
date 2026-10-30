@@ -17,20 +17,6 @@ if status --is-interactive
         alias nano="edit"
     end
 
-    if [ (hostname) = bikupa ] && [ $USER = root ]
-        set -x RCLONE_PASSWORD_COMMAND systemd-creds decrypt /etc/credstore.encrypted/rclone.pw
-    else if [ $TERMUX_VERSION ]
-        set -x CARGO_BUILD_TARGET aarch64-linux-android
-
-        if not [ -f ~/.secrets/rclone ]
-            set -x RCLONE_PASSWORD_COMMAND ssh root@bikupa systemd-creds decrypt /etc/credstore.encrypted/rclone.pw
-        end
-
-        set -ax PATH ~/.hem/bin
-    else
-        set -x RCLONE_PASSWORD_COMMAND systemd-creds --user decrypt ~/.secrets/rclone
-    end
-
     set -x GPG_TTY (tty)
 
     set -a PATH /sbin \

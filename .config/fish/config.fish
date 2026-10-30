@@ -8,8 +8,7 @@ if [ (id -u) = 1000 ]
                 [ -z $CONTAINER_ID ] && \
                 not [ $TMUX ] && \
                 not [ $SSH_CONNECTION ] && \
-                not [ $TERMUX_VERSION ] && \
-                [ (hostname) != bikupa ]
+                not [ $TERMUX_VERSION ]
             exec tmux new-session fish
         end
     end

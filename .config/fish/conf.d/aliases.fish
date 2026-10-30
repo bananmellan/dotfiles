@@ -306,7 +306,7 @@ else if exists nixos-rebuild && [ -z $CONTAINER_ID ]
     function u
         pushd /etc/nixos
         $S nix flake update || return
-        $S nixos-rebuild --flake '.#bikupa' switch || return
+        $S nixos-rebuild --flake '.#main' switch || return
         popd
     end
     alias c="$S nix-collect-garbage -d && $S nix-store --optimise"
