@@ -165,6 +165,14 @@ def build_image(image: str, context: dict) -> bool:
             if arg:
                 build_cmd.extend(["--build-arg", arg])
 
+    # Always include USER and HOME build args
+    user_env = os.environ.get("USER", "")
+    if user_env:
+        build_cmd.extend(["--build-arg", f"USER={user_env}"])
+    home_env = os.environ.get("HOME", "")
+    if home_env:
+        build_cmd.extend(["--build-arg", f"HOME={home_env}"])
+
     build_volumes = os.environ.get("PODG_BUILD_VOLUME", "")
     if build_volumes:
         for vol in build_volumes.split(","):
@@ -187,8 +195,7 @@ def build_image(image: str, context: dict) -> bool:
     try:
         result = subprocess.run(
             build_cmd,
-            text=True,
-            timeout=300
+            text=True
         )
         if result.returncode != 0:
             print(f"Build failed for {image}", file=sys.stderr)
@@ -432,7 +439,7 @@ def main():
                 if verbose:
                     print(f"[verbose] Error getting current profile: {e}", file=sys.stderr)
                 original_profile = None
-            
+
             cmd = ["pactl", "set-card-profile", card_name, "pro-audio"]
             if verbose:
                 print(f"[verbose] Setting profile to pro-audio: {cmd}", file=sys.stderr)
@@ -442,7 +449,7 @@ def main():
                 print(f"Warning: audio setup failed for {hostname}: {e.stderr}", file=sys.stderr)
             except FileNotFoundError:
                 print("Warning: pactl command not found", file=sys.stderr)
-        
+
         podman_args.extend([
             "--volume=/tmp:/tmp",
             "--volume=/dev/snd:/dev/snd",
