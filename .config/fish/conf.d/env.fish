@@ -6,7 +6,7 @@ if status --is-interactive
     set -x LANG en_US.UTF-8
     set -x LANGUAGE $LANG
     set -x LC_ALL $LANG
-    if exists emacsclient
+    if exists emacsclient && [ -S "$XDG_RUNTIME_DIR/emacs/server" ]
         # set -x EDITOR (command -v emacs)" -nw -Q -l $HOME/.emacs.d/minit.el"
         set -x EDITOR (command -v editor)
         set -x SUDO_EDITOR $EDITOR
@@ -23,7 +23,7 @@ if status --is-interactive
         set -x CARGO_BUILD_TARGET aarch64-linux-android
 
         if not [ -f ~/.secrets/rclone ]
-            set -x RCLONE_PASSWORD_COMMAND ssh bikupa systemd-creds decrypt /etc/credstore.encrypted/rclone.pw
+            set -x RCLONE_PASSWORD_COMMAND ssh root@bikupa systemd-creds decrypt /etc/credstore.encrypted/rclone.pw
         end
 
         set -ax PATH ~/.hem/bin

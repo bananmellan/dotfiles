@@ -1698,7 +1698,7 @@ körverk syns som meddelande i ekorutan."
 (use-package yasnippet :ensure
   :if (not (string-equal system-name "localhost"))
   :init
-  (let ((yas-dir (concat (getenv "HEM") "/.emacs.d/snippets")))
+  (let ((yas-dir (concat (getenv "HOME") "/.hem/.emacs.d/snippets")))
     (add-to-list 'yas-snippet-dirs yas-dir))
   (yas-global-mode 1))
 #+end_src
