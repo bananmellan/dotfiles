@@ -1,6 +1,8 @@
 function _box
     if not podman container exists $argv[1]
-        distrobox assemble create --file $HEM/.config/distroboxes/$argv[1].ini
+        if [ -f "$HEM/.config/distroboxes/$argv[1].ini" ]
+            distrobox assemble create --file $HEM/.config/distroboxes/$argv[1].ini
+        end
     end
 
     if [ (podman inspect $argv[1] | jq .[0].State.Status) != '"running"' ]

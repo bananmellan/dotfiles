@@ -7,7 +7,6 @@ export PATH=$PATH:/opt/local/bin
 export PATH=$PATH:$HOME/.cargo/bin
 export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH
 export PATH=/home/linuxbrew/.linuxbrew/sbin:$PATH
-export PATH=$HOME/.venv/bin:$PATH
 
 export XDG_CONFIG_HOME=$HOME/.config
 export ORG_DIR=$HEM-.org

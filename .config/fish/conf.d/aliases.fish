@@ -80,8 +80,7 @@ if status --is-interactive
     # Secret management
     # --------------------------------------------------------------------------
     function hemlis
-        wl-paste | \
-            run0 --pipe sh -c "systemd-creds encrypt --user --uid=$(id -u) --with-key=host+tpm2 - $HOME/.secrets/$argv[1] && chown $USER:$USER $HOME/.secrets/$argv[1]"
+        run0 --pipe "echo -n $(wl-paste --type text/plain) | systemd-creds --user --uid=$(id -u) encrypt --with-key=host+tpm2 - $HOME/.secrets/$argv[1] && chown $USER:$USER $HOME/.secrets/$argv[1]"
     end
 
     # --------------------------------------------------------------------------
@@ -89,13 +88,6 @@ if status --is-interactive
     # --------------------------------------------------------------------------
     if exists diceware
         alias diceware="diceware --no-caps -d ."
-    end
-
-    # --------------------------------------------------------------------------
-    # Privilege escalation tools
-    # --------------------------------------------------------------------------
-    if not [ $CONTAINER_ID ] && not [ $SSH_CLIENT ]
-        alias run0="run0 --pty"
     end
 
     # --------------------------------------------------------------------------
@@ -146,30 +138,31 @@ if status --is-interactive
     function dec; python -c "print($argv[1])"; end
 
     # --------------------------------------------------------------------------
-    # Portage configuration synchronization
-    # --------------------------------------------------------------------------
-    function sync_portage_stuff
-        set basepath $argv[1]
-        function RSYNC -V basepath
-            set p $basepath$argv
-            run0 rsync --delete -av 10.82.77.1:$p (dirname $argv)
-        end
-
-        RSYNC /etc/portage/package.use
-        RSYNC /etc/portage/package.accept_keywords
-        RSYNC /etc/portage/package.mask
-        RSYNC /etc/portage/make.conf
-        RSYNC /etc/portage/repos.conf
-
-        RSYNC /var/lib/portage/world
-        # RSYNC /var/lib/portage/world_sets
-    end
-
-    # --------------------------------------------------------------------------
     # Emacs package management
     # --------------------------------------------------------------------------
     function emacs-upgrade-pkgs
         emacsclient -e '(package-upgrade-all)'
+    end
+
+    if exists flatpak
+        alias fu="flatpak --user"
+    end
+
+    if exists systemctl
+        if [ $USER = root ]
+            alias sy="systemctl"
+            alias syr="systemctl daemon-reload && systemctl restart -v"
+            alias sys="systemctl daemon-reload && systemctl start -v"
+            alias syo="systemctl daemon-reload && systemctl stop -v"
+            alias syi="systemctl daemon-reload && systemctl stop -v"
+        else
+            alias sy="systemctl --user daemon-reload && systemctl --user"
+            alias syr="systemctl --user daemon-reload && systemctl --user restart -v"
+            alias sys="systemctl --user daemon-reload && systemctl --user start -v"
+            alias syo="systemctl --user daemon-reload && systemctl --user stop -v"
+            alias syi="systemctl --user daemon-reload && systemctl --user stop -v"
+            alias jo="journalctl --user"
+        end
     end
 end
 
@@ -187,11 +180,15 @@ end
 # ----------------------------------------------------------------------------
 # Privilege escalation selection
 # ----------------------------------------------------------------------------
+set S sudo
 if [ $container ]
-    set S sudo
     alias yabridgectl="HOME=$HOME/.local/share/yabridge-home /var/home/adam/.local/share/yabridge/yabridgectl"
-else
-    set S run0
+else if exists systemctl && test (systemctl --version | string match -r 'systemd (\d+)' | tail -1) -ge 258
+    if not [ $CONTAINER_ID ]
+        alias run0="run0 --pty -i"
+    end
+
+    set S (command -v run0)
 end
 
 # ----------------------------------------------------------------------------
@@ -208,8 +205,127 @@ if [ $TERMUX_VERSION ]
     end
     alias c="sh -c \"$PKGM autoremove && $PKGM clean && $PKGM purge '~c'\""
 # ----------------------------------------------------------------------------
-# Debian/Ubuntu based systems
+# Fedora Silverblue (system extensions)
 # ----------------------------------------------------------------------------
+else if uname -r | grep -q secureblue && exists systemd-sysext
+    function __sysext_validate
+        set SYSEXT $argv[1]
+        if not string match -r -- '^[A-Za-z0-9._-]+$' "$SYSEXT" > /dev/null
+            echo "Invalid extension name: $SYSEXT"
+            return 1
+        end
+        return 0
+    end
+
+    function __sysext_install_script
+        echo '#!/usr/bin/env bash'
+        echo 'set -e'
+        echo 'SYSEXT="$1"'
+        echo 'TMP="$2"'
+        echo 'install -d -m 0755 -o 0 -g 0 "/etc/sysupdate.$SYSEXT.d"'
+        echo 'restorecon -RFv "/etc/sysupdate.$SYSEXT.d"'
+        echo 'install -m 0644 -o 0 -g 0 "$TMP" "/etc/sysupdate.$SYSEXT.d/$SYSEXT.conf"'
+        echo '/usr/lib/systemd/systemd-sysupdate update --component "$SYSEXT"'
+        echo 'systemctl restart systemd-sysext.service'
+    end
+
+    function __sysext_remove_script
+        echo '#!/usr/bin/env bash'
+        echo 'set -e'
+        echo 'SYSEXT="$1"'
+        echo 'rm -f "/var/lib/extensions/$SYSEXT.raw"'
+        echo 'rm -f /var/lib/extensions.d/"$SYSEXT"-*.raw'
+        echo 'rm -f "/etc/sysupdate.$SYSEXT.d/$SYSEXT.conf"'
+        echo 'rmdir "/etc/sysupdate.$SYSEXT.d/" 2>/dev/null || true'
+        echo 'systemctl restart systemd-sysext.service'
+    end
+
+    function __sysext_upgrade_script
+        echo '#!/usr/bin/env bash'
+        echo 'set -e'
+        echo 'SYSEXTS="$1"'
+        echo 'COMPONENT_COUNT=$(echo "$SYSEXTS" | wc -w)'
+        echo 'if [ "$COMPONENT_COUNT" -eq 0 ]; then'
+        echo '    echo "No sysexts installed, nothing to do."'
+        echo '    exit 0'
+        echo 'fi'
+        echo 'echo "Updating $COMPONENT_COUNT sysext(s): $SYSEXTS"'
+        echo 'for c in $SYSEXTS; do'
+        echo '    echo "=== $c ==="'
+        echo '    /usr/lib/systemd/systemd-sysupdate update --component "$c"'
+        echo 'done'
+        echo 'systemctl restart systemd-sysext.service'
+        echo '/usr/bin/systemd-sysext status || true'
+    end
+
+    function i
+        set SYSEXT $argv[1]
+        __sysext_validate "$SYSEXT"; or return 1
+        set URL "https://extensions.fcos.fr/fedora"
+
+        set CONF (mktemp)
+        set SCRIPT (mktemp)
+        if not curl --silent --fail --location "$URL/$SYSEXT.conf" -o "$CONF"
+            echo "Failed to fetch $SYSEXT.conf"
+            rm -f "$CONF" "$SCRIPT"
+            return 1
+        end
+        __sysext_install_script > "$SCRIPT"
+
+        # One run0 prompt; plain file path + two simple tokens as arguments
+        run0 bash "$SCRIPT" "$SYSEXT" "$CONF"
+        set STATUS $status
+        rm -f "$CONF" "$SCRIPT"
+        return $STATUS
+    end
+
+    function r
+        set SYSEXT $argv[1]
+        __sysext_validate "$SYSEXT"; or return 1
+
+        set SCRIPT (mktemp)
+        __sysext_remove_script > "$SCRIPT"
+        run0 bash "$SCRIPT" "$SYSEXT"
+        set STATUS $status
+        rm -f "$SCRIPT"
+        return $STATUS
+    end
+
+    function u
+        # Enumerate installed components unprivileged
+        set COMPONENTS (/usr/lib/systemd/systemd-sysupdate components --json=short \
+            | jq -r '.components[]' \
+            | string match -r -- '^[A-Za-z0-9._-]+$')
+
+        if test (count $COMPONENTS) -eq 0
+            echo "No sysexts installed, nothing to do."
+            return 0
+        end
+
+        echo "Updating "(count $COMPONENTS)" sysext(s): "(string join ' ' -- $COMPONENTS)
+
+        set SCRIPT (mktemp)
+        __sysext_upgrade_script > "$SCRIPT"
+        # Single run0 prompt for the whole upgrade run
+        run0 bash "$SCRIPT" (string join ' ' -- $COMPONENTS)
+        set STATUS $status
+        rm -f "$SCRIPT"
+        return $STATUS
+    end
+
+    function s
+        if test (count $argv) -eq 0
+            echo "Usage: sysext-search <search term>"
+            return 1
+        end
+
+        curl -fsSL https://api.github.com/repos/fedora-sysexts/fedora/contents/ \
+            | jq -r '.[] | select(.type == "dir") | .name' \
+            | string match -i -- "*"(string join ' ' -- $argv)"*"
+    end
+    # ----------------------------------------------------------------------------
+    # Debian/Ubuntu based systems
+    # ----------------------------------------------------------------------------
 else if exists apt
     set PKGM apt
 
@@ -220,9 +336,9 @@ else if exists apt
         $S sh -c "$PKGM update && $PKGM -u dist-upgrade"
     end
     alias c="$S sh -c \"$PKGM autoremove && $PKGM clean && $PKGM purge '~c'\""
-# ----------------------------------------------------------------------------
-# Arch Linux based systems
-# ----------------------------------------------------------------------------
+    # ----------------------------------------------------------------------------
+    # Arch Linux based systems
+    # ----------------------------------------------------------------------------
 else if exists pacman
     alias i="$S pacman -Sy"
     alias r="$S pacman -Rs"
@@ -246,40 +362,6 @@ else if exists pkg
     alias r="pkg remove"
     alias u="pkg upgrade"
     alias c="pkg clean; pkg autoclean"
-# ----------------------------------------------------------------------------
-# Fedora Silverblue (system extensions)
-# ----------------------------------------------------------------------------
-else if exists systemd-sysext
-    function i
-        set SYSEXT $argv[1]
-        set URL "https://extensions.fcos.fr/fedora"
-        install -d -m 0755 -o 0 -g 0 "/etc/sysupdate.$SYSEXT.d"
-        restorecon -RFv "/etc/sysupdate.$SYSEXT.d"
-        curl --silent --fail --location "$URL/$SYSEXT.conf" \
-            | tee "/etc/sysupdate.$SYSEXT.d/$SYSEXT.conf"
-        /usr/lib/systemd/systemd-sysupdate update --component "$SYSEXT"
-        systemctl restart systemd-sysext.service
-    end
-
-    function r
-        set SYSEXT $argv[1]
-        rm "/var/lib/extensions/$SYSEXT.raw"
-        rm "/var/lib/extensions.d/$SYSEXT-"*".raw"
-        rm "/etc/sysupdate.$SYSEXT.d/$SYSEXT.conf"
-        rmdir "/etc/sysupdate.$SYSEXT.d/"
-        systemctl restart systemd-sysext.service
-    end
-
-    function s
-        if test (count $argv) -eq 0
-            echo "Usage: sysext-search <search term>"
-            return 1
-        end
-
-        curl -fsSL https://api.github.com/repos/fedora-sysexts/fedora/contents/ \
-            | jq -r '.[] | select(.type == "dir") | .name' \
-            | string match -i -- "*"(string join ' ' -- $argv)"*"
-    end
 # ----------------------------------------------------------------------------
 # Fedora Silverblue (rpm-ostree)
 # ----------------------------------------------------------------------------

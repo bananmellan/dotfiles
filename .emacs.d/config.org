@@ -147,7 +147,7 @@
           (my/light)))
     ;; Not in Termux - use existing desktop logic
     (if (string-match-p
-         "prefer-dark"
+         "'prefer-dark'"
          (shell-command-to-string
       "dconf read /org/gnome/desktop/interface/color-scheme"))
         (my/dark) (my/light)))
@@ -1926,6 +1926,11 @@ körverk syns som meddelande i ekorutan."
   :init
   (add-to-list 'magic-mode-alist '("\\(\\(?:^# nginx\\|^server\\|^http\\|^upstream\\)\\)" . nginx-mode))
   (add-to-list 'auto-mode-alist '("/nginx/sites-\\(?:available\\|enabled\\)/" . nginx-mode)))
+#+end_src
+** Caddyfile
+#+begin_src emacs-lisp
+(use-package caddyfile-mode :ensure
+  :mode "Caddyfile\\'")
 #+end_src
 ** COMMENT Golden ratio
 :LOGBOOK:

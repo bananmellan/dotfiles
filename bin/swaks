@@ -1,0 +1,45 @@
+#!/usr/bin/env fish
+set -l image_name swaks
+set -l build_dir (mktemp -d -t swaks-build.XXXXXX)
+
+echo '
+ARG ALPINE_VERSION=3.21
+ARG SWAKS_VERSION=20240103.0
+
+FROM alpine:${ALPINE_VERSION} AS builder
+
+ARG SWAKS_VERSION
+
+RUN apk add --no-cache git \
+    && git clone --depth 1 --branch "v${SWAKS_VERSION}" \
+       https://github.com/jetmore/swaks.git /src
+
+FROM alpine:${ALPINE_VERSION}
+
+RUN apk add --no-cache \
+        perl \
+        perl-net-ssleay \
+    && addgroup -S swaks \
+    && adduser -S -G swaks -s /sbin/nologin swaks
+
+COPY --from=builder --chown=root:root /src/swaks /usr/local/bin/swaks
+RUN chmod 0555 /usr/local/bin/swaks
+
+USER swaks
+
+ENTRYPOINT ["swaks"]
+' > $build_dir/Containerfile
+
+if not podman image exists $image_name
+    echo "Building image $image_name..."
+    podman build -t $image_name $build_dir
+    or begin
+        echo "Image build failed."
+        rm -rf $build_dir
+        exit 1
+    end
+end
+
+rm -rf $build_dir
+
+podman run -it --network=host --rm $image_name $argv

@@ -24,3 +24,4 @@ playbooks
 \.stversions
 volumes
 sync
+src

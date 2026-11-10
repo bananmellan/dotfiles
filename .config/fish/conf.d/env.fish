@@ -22,4 +22,8 @@ if status --is-interactive
     set -a PATH /sbin \
         /usr/sbin \
     $HOME/.local/share/pnpm/bin
+
+    if [ -d ~/.venv ]
+        VIRTUAL_ENV_DISABLE_PROMPT=y source ~/.venv/bin/activate.fish
+    end
 end
